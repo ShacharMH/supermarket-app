@@ -16,9 +16,10 @@ import shutil
 import sys
 import tempfile
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import psycopg
-from il_supermarket_scarper import FileTypesFilters, ScraperFactory, datetime_in_tlv
+from il_supermarket_scarper import FileTypesFilters, ScraperFactory
 from il_supermarket_scarper.utils.files.file_output import DiskFileOutput
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -29,7 +30,7 @@ from parse_xml import parse_prices, parse_promos, parse_stores  # noqa: E402
 CITY_MARGIN_KM = 4
 MAX_PROMO_ITEMS = 3000
 
-STAMP_RE = re.compile(r"(\d{12})(?:\.\w+)*$")
+STAMP_RE = re.compile(r"(\d{8})-?(\d{4,6})")
 
 
 def log(msg: str) -> None:
@@ -40,8 +41,8 @@ def log(msg: str) -> None:
 
 def _newest(paths: list[str]) -> list[str]:
     def stamp(p):
-        m = STAMP_RE.search(os.path.basename(p))
-        return m.group(1) if m else ""
+        m = STAMP_RE.findall(os.path.basename(p))
+        return "".join(m[-1]).ljust(14, "0") if m else ""
     return sorted(paths, key=stamp, reverse=True)
 
 
@@ -64,7 +65,7 @@ async def _scrape(enum: ScraperFactory, dest: str, files_types, regex=None, when
 
 def fetch(enum: ScraperFactory, files_types: list[str], regex: str | None = None) -> list[str]:
     """Download files of the given types, preferring today's, then yesterday's."""
-    today = datetime_in_tlv()
+    today = datetime.now(ZoneInfo("Asia/Jerusalem"))
     attempts = [dict(when_date=today), dict(when_date=today - timedelta(days=1)), dict(limit=40)]
     for kw in attempts:
         dest = tempfile.mkdtemp(prefix=f"{enum.name}-")
@@ -315,11 +316,11 @@ def ingest_prices(conn, tracked_rows) -> None:
     for scraper, branches in by_scraper.items():
         enum = getattr(ScraperFactory, scraper)
         ids = "|".join(f"0*{int(s)}" for _b, s, _c in branches)
-        regex = rf"-({ids})-\d{{12}}"
+        regex = rf"-({ids})-\d{{8}}"
         log(f"prices: {scraper} ({len(branches)} branches)")
         paths = fetch(enum, [FileTypesFilters.PRICE_FULL_FILE.name, FileTypesFilters.PROMO_FULL_FILE.name], regex)
         for bid, store_id, chain_id in branches:
-            pat = re.compile(rf"-0*{int(store_id)}-\d{{12}}", re.I)
+            pat = re.compile(rf"-0*{int(store_id)}-\d{{8}}", re.I)
             mine = [p for p in paths if pat.search(os.path.basename(p))]
             price_files = [p for p in mine if "pricefull" in os.path.basename(p).lower()]
             promo_files = [p for p in mine if "promofull" in os.path.basename(p).lower()]
