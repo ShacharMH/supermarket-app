@@ -7,6 +7,7 @@ import {
 } from "../lib/basket";
 
 type Result = {
+  strict: Set<string>;
   items: ResolvedItem[];
   results: Map<string, Product[]>;
   stores: StoreOption[];
@@ -19,14 +20,17 @@ function storeTitle(b: BranchRow) {
   return `${b.chain_name} · ${b.branch_name ?? ""}${b.is_online ? " (אונליין)" : ""}`;
 }
 
-function Lines({ lines }: { lines: Line[] }) {
+const kg = (q: number) => (q < 1 ? `${Math.round(q * 1000)} גרם` : `${+q.toFixed(2)} ק"ג`);
+
+function Lines({ lines, weighted }: { lines: Line[]; weighted: Set<string> }) {
   return (
     <ul className="lines">
       {lines.map((l) => (
         <li key={l.key}>
           <span className="lname">
-            {l.qty !== 1 && <b>{l.qty}× </b>}
+            {weighted.has(l.key) ? <b>{kg(l.qty)} · </b> : l.qty !== 1 && <b>{l.qty}× </b>}
             {l.name}
+            {weighted.has(l.key) && <span className="muted small"> ({money(l.price)} לק"ג)</span>}
             {!l.preferred && <span className="tag alt">חלופה</span>}
             {l.promo && <span className="tag promo">{l.promo}</span>}
           </span>
@@ -45,6 +49,7 @@ export default function ListPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [tracked, setTracked] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const saveTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -81,33 +86,53 @@ export default function ListPage() {
     setError(null);
     try {
       const [prefs, history, clubs] = await Promise.all([
-        supabase.from("product_preferences").select("term, barcode"),
+        supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
       ]);
       const pinned = new Map<string, string[]>();
-      for (const p of prefs.data ?? []) pinned.set(p.term, [...(pinned.get(p.term) ?? []), p.barcode]);
+      const strict = new Set<string>();
+      for (const p of prefs.data ?? []) {
+        pinned.set(p.term, [...(pinned.get(p.term) ?? []), p.barcode]);
+        if (p.strict) strict.add(p.term);
+      }
       const bought = new Map<string, number>((history.data ?? []).map((h) => [h.barcode, h.times_bought]));
 
+      const search = async (fn: string, term: string, max: number) => {
+        // "בשר טחון בקר" -> "בשר טחון" -> "בשר": drop trailing words until something matches
+        const words = term.split(/\s+/);
+        for (let n = words.length; n >= 1; n--) {
+          const { data, error } = await supabase.rpc(fn, { term: words.slice(0, n).join(" "), max_results: max });
+          if (error) throw error;
+          if (data?.length || n === 1) return (data ?? []) as Product[];
+        }
+        return [];
+      };
       const results = new Map<string, Product[]>();
       await Promise.all(
         items.map(async (it) => {
-          // "בשר טחון מהקצביה" -> "בשר טחון" -> "בשר": drop trailing words until something matches
-          const words = it.key.split(/\s+/);
-          for (let n = words.length; n >= 1; n--) {
-            const { data, error } = await supabase.rpc("search_products", { term: words.slice(0, n).join(" "), max_results: 25 });
-            if (error) throw error;
-            if (data?.length || n === 1) {
-              results.set(it.key, (data ?? []) as Product[]);
-              break;
-            }
-          }
+          // Weighed goods (butcher, deli, produce) use per-chain codes and are searched separately.
+          const [packaged, weighed] = await Promise.all([
+            it.byWeight ? Promise.resolve([]) : search("search_products", it.key, 40),
+            search("search_weighed", it.key, 40),
+          ]);
+          const seen = new Set(packaged.map((p) => p.barcode));
+          results.set(it.key, [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))]);
         }),
       );
-      const resolved = items.map((it) => resolveItem(it, results.get(it.key) ?? [], pinned.get(it.key) ?? [], bought));
+      const resolved = items.map((it) =>
+        resolveItem(it, results.get(it.key) ?? [], pinned.get(it.key) ?? [], bought, strict.has(it.key)),
+      );
       const payload = resolved
         .filter((r) => r.candidates.length)
-        .map((r) => ({ key: r.key, qty: r.qty, candidates: r.candidates.map((c) => c.barcode), preferred: r.preferred }));
+        .map((r) => ({
+          key: r.key,
+          qty: r.qty,
+          candidates: r.candidates.map((c) => c.barcode),
+          // a weighed item's code exists in one chain only, so preferring it would
+          // penalise every other chain's equivalent - compare them on price alone
+          preferred: r.weighted && !strict.has(r.key) ? [] : r.preferred,
+        }));
 
       const { data, error } = await supabase.rpc("price_basket", {
         items: payload,
@@ -119,7 +144,7 @@ export default function ListPage() {
       const keys = resolved.map((r) => r.key);
       const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee });
       const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
-      setResult({ items: resolved, results, stores, splits });
+      setResult({ items: resolved, results, stores, splits, strict });
     } catch (e) {
       // Supabase errors are plain objects with a message, not Error instances
       const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
@@ -129,13 +154,18 @@ export default function ListPage() {
     }
   }
 
-  async function pin(term: string, barcode: string) {
+  async function pin(term: string, barcode: string, strict = false) {
+    setNotice("מחשב מחדש לפי הבחירה שלך...");
     await supabase.from("product_preferences").delete().eq("term", term);
-    if (barcode) await supabase.from("product_preferences").insert({ term, barcode });
+    if (barcode) await supabase.from("product_preferences").insert({ term, barcode, strict });
     await compare();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setNotice(`✓ הסל חושב מחדש עם הבחירה עבור "${term}"`);
+    window.setTimeout(() => setNotice(null), 4000);
   }
 
   const best = result?.stores[0];
+  const weighted = new Set(result?.items.filter((i) => i.weighted).map((i) => i.key) ?? []);
 
   return (
     <div className="page">
@@ -149,6 +179,7 @@ export default function ListPage() {
         {lastRun && `מחירים עודכנו: ${lastRun}`}
       </p>
       {error && <p className="error">{error}</p>}
+      {notice && <p className="note">{notice}</p>}
 
       {result && (
         <>
@@ -170,7 +201,7 @@ export default function ListPage() {
               })()}
               <details>
                 <summary>פירוט</summary>
-                <Lines lines={best.branch.lines} />
+                <Lines lines={best.branch.lines} weighted={weighted} />
               </details>
             </section>
           ) : (
@@ -187,9 +218,9 @@ export default function ListPage() {
                     <span className="save">חוסך {money(s.saving)}</span>
                   </summary>
                   <h4>{storeTitle(s.a)}</h4>
-                  <Lines lines={s.linesA} />
+                  <Lines lines={s.linesA} weighted={weighted} />
                   <h4>{storeTitle(s.b)}</h4>
-                  <Lines lines={s.linesB} />
+                  <Lines lines={s.linesB} weighted={weighted} />
                 </details>
               ))}
             </section>
@@ -209,7 +240,7 @@ export default function ListPage() {
                       </span>
                     </summary>
                     <div className="muted small">{o.branch.address} {o.branch.city}</div>
-                    <Lines lines={o.branch.lines} />
+                    <Lines lines={o.branch.lines} weighted={weighted} />
                     {o.missing.length > 0 && <div className="warn">חסר: {o.missing.join(", ")}</div>}
                   </details>
                 </li>
@@ -220,11 +251,16 @@ export default function ListPage() {
           <section className="card">
             <h3>איך הבנתי את הרשימה</h3>
             <p className="muted small">
-              בחירה של מוצר ספציפי הופכת אותו למועדף. מוצר אחר ייבחר רק אם הוא זול ממנו ביותר מהסף שבהגדרות.
+              בחירה של מוצר ספציפי הופכת אותו למועדף והסל מחושב מחדש. מוצר אחר ייבחר רק אם הוא זול ממנו ביותר מהסף
+              שבהגדרות, אלא אם מסמנים "בלי תחליפים". מוצרים במשקל (קצביה, מעדנייה, ירקות) מושווים לפי מחיר לק"ג. כדי לקבוע
+              כמות כותבים למשל "בשר טחון מהקצביה 500 גרם".
             </p>
             {result.items.map((it) => (
               <div key={it.key} className="item">
-                <div className="ikey">{it.key}</div>
+                <div className="ikey">
+                  {it.key}
+                  {it.weighted && <span className="tag alt">במשקל · {kg(it.qty)}</span>}
+                </div>
                 {(result.results.get(it.key) ?? []).length === 0 ? (
                   <div className="warn">לא נמצא מוצר תואם</div>
                 ) : (
@@ -233,10 +269,22 @@ export default function ListPage() {
                     {(result.results.get(it.key) ?? []).map((p) => (
                       <option key={p.barcode} value={p.barcode}>
                         {p.name}
-                        {p.manufacturer ? ` · ${p.manufacturer}` : ""} · {money(p.min_price)}-{money(p.max_price)}
+                        {p.manufacturer ? ` · ${p.manufacturer}` : ""} · {money(p.min_price)}
+                        {p.max_price !== p.min_price ? `-${money(p.max_price)}` : ""}
+                        {p.is_weighted ? ' לק"ג' : ""}
                       </option>
                     ))}
                   </select>
+                )}
+                {it.preferred[0] && result.strict !== undefined && (
+                  <label className="strict">
+                    <input
+                      type="checkbox"
+                      checked={result.strict.has(it.key)}
+                      onChange={(e) => pin(it.key, it.preferred[0], e.target.checked)}
+                    />
+                    רק המוצר הזה, בלי תחליפים
+                  </label>
                 )}
               </div>
             ))}

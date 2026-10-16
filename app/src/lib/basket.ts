@@ -1,6 +1,10 @@
 // Pure shopping-basket logic (no I/O) so it can be unit-tested.
 
-export type ListItem = { key: string; qty: number };
+/** key: what to search for (and pin preferences by); qty: count, or kg for weighed items. */
+export type ListItem = { key: string; qty: number; weightKg?: number; byWeight?: boolean };
+
+// Words that say "from the counter, sold by weight" - they never appear in product names.
+const BY_WEIGHT_RE = /(^|\s)(מה?קצביה|מה?אטליז|מה?מעדניה|מה?מעדנייה|מהדלפק|במשקל|שקילה?)(?=\s|$)/g;
 
 export type Product = {
   barcode: string;
@@ -15,6 +19,7 @@ export type Product = {
 };
 
 export type ResolvedItem = ListItem & {
+  weighted: boolean; // sold by weight: qty is kilograms and prices are per kg
   candidates: Product[];
   preferred: string[]; // barcodes; empty = no preference, any candidate is fine
   reference: Product | null;
@@ -65,11 +70,31 @@ export type SplitOption = {
 
 // "2 קוטג", "קוטג x2", "קוטג ×2", "קוטג *2". A trailing bare number is NOT a
 // quantity ("חלב 3", "קוטג 5%") to avoid eating product attributes.
+// "500 גרם", "1.5 ק"ג", "300ג'", "2 קילו" anywhere in the line
+const WEIGHT_RE = /(\d+(?:[.,]\d+)?)\s*(ק"ג|ק״ג|קג|קילוגרם|קילו|kg|גרם|גר'?|ג'|ג׳|gr|g)(?=\s|$)/i;
+
+function toKg(amount: number, unit: string): number {
+  return /^(ק"ג|ק״ג|קג|קילוגרם|קילו|kg)$/i.test(unit) ? amount : amount / 1000;
+}
+
+// "2 קוטג", "קוטג x2", "קוטג ×2", "קוטג *2", "בשר טחון 500 גרם". A trailing bare
+// number is NOT a quantity ("חלב 3", "קוטג 5%") to avoid eating product attributes.
 export function parseList(text: string): ListItem[] {
   const out: ListItem[] = [];
-  for (const raw of text.split(/\n|,/)) {
+  for (const raw of text.split(/\n|,(?!\d)/)) {
     let line = raw.replace(/^[\s\-•*·]+/, "").trim();
     if (!line) continue;
+    let weightKg: number | undefined;
+    const w = line.match(WEIGHT_RE);
+    if (w) {
+      weightKg = toKg(parseFloat(w[1].replace(",", ".")), w[2]);
+      line = (line.slice(0, w.index) + line.slice((w.index ?? 0) + w[0].length)).replace(/\s+/g, " ").trim();
+    }
+    let byWeight = false;
+    if (line.match(BY_WEIGHT_RE)) {
+      byWeight = true;
+      line = line.replace(BY_WEIGHT_RE, " ").replace(/\s+/g, " ").trim();
+    }
     let qty = 1;
     const lead = line.match(/^(\d+(?:\.\d+)?)\s*(?:x|×|\*)?\s+(.+)$/i);
     const trail = line.match(/^(.+?)\s*(?:x|×|\*)\s*(\d+(?:\.\d+)?)$/i);
@@ -80,13 +105,17 @@ export function parseList(text: string): ListItem[] {
       qty = parseFloat(trail[2]);
       line = trail[1];
     }
-    out.push({ key: line.trim(), qty: qty > 0 ? qty : 1 });
+    if (!line) continue;
+    const item: ListItem = { key: line.trim(), qty: qty > 0 ? qty : 1 };
+    if (weightKg) item.weightKg = weightKg;
+    if (byWeight) item.byWeight = true;
+    out.push(item);
   }
   // merge duplicates
   const merged = new Map<string, ListItem>();
   for (const it of out) {
     const prev = merged.get(it.key);
-    merged.set(it.key, prev ? { key: it.key, qty: prev.qty + it.qty } : it);
+    merged.set(it.key, prev ? { ...prev, qty: prev.qty + it.qty } : it);
   }
   return [...merged.values()];
 }
@@ -111,6 +140,7 @@ function baseAmount(p: Product): [string, number] | null {
 
 /** Are two products comparable substitutes (same unit, size within ±25%)? */
 export function similarSize(a: Product, b: Product): boolean {
+  if (a.is_weighted || b.is_weighted) return a.is_weighted === b.is_weighted; // per-kg vs per-kg only
   const x = baseAmount(a);
   const y = baseAmount(b);
   if (!x || !y) return true;
@@ -129,21 +159,34 @@ export function resolveItem(
   results: Product[],
   pinned: string[],
   bought: Map<string, number>,
+  strict = false,
 ): ResolvedItem {
-  if (results.length === 0) return { ...item, candidates: [], preferred: [], reference: null };
+  if (results.length === 0) return { ...item, weighted: false, candidates: [], preferred: [], reference: null };
 
   let preferred = pinned.filter((b) => results.some((r) => r.barcode === b));
-  if (preferred.length === 0) {
+  const isPinned = preferred.length > 0;
+  if (!isPinned) {
     preferred = results
       .filter((r) => bought.has(r.barcode))
       .sort((a, b) => (bought.get(b.barcode) ?? 0) - (bought.get(a.barcode) ?? 0))
       .map((r) => r.barcode);
   }
-  const reference = results.find((r) => r.barcode === preferred[0]) ?? results[0];
-  const candidates = results.filter(
-    (r) => preferred.includes(r.barcode) || similarSize(r, reference),
-  );
-  return { ...item, candidates, preferred, reference };
+  let reference = results.find((r) => r.barcode === preferred[0]) ?? null;
+  if (!reference && item.byWeight) reference = results.find((r) => r.is_weighted) ?? null;
+  if (!reference && item.weightKg) {
+    // "קוטג 250 גרם": a packaged product of about that size, or anything sold by weight
+    const target: Product = { ...results[0], is_weighted: false, quantity: item.weightKg * 1000, unit_of_measure: "גרם" };
+    reference = results.find((r) => !r.is_weighted && similarSize(r, target)) ?? results.find((r) => r.is_weighted) ?? null;
+  }
+  reference ??= results[0];
+  const weighted = reference.is_weighted;
+  const candidates =
+    strict && isPinned
+      ? results.filter((r) => preferred.includes(r.barcode))
+      : results.filter((r) => preferred.includes(r.barcode) || similarSize(r, reference));
+  // weighed goods: qty is kilograms (default 1kg); packaged goods: qty is a count
+  const qty = weighted ? (item.weightKg ?? 1) * item.qty : item.qty;
+  return { ...item, qty, weighted, candidates, preferred, reference };
 }
 
 function sum(xs: number[]): number {

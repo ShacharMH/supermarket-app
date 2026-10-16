@@ -82,3 +82,4 @@ details > summary { cursor: pointer; padding: 6px 0; list-style-position: inside
 .login { max-width: 360px; margin: 0 auto; padding: 48px 16px; display: flex; flex-direction: column; gap: 10px; }
 .login h1 { color: var(--accent); margin: 0; }
 input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
+.strict { display: flex; gap: 6px; align-items: center; font-size: 0.85rem; color: var(--muted); }

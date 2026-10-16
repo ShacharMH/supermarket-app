@@ -34,18 +34,63 @@ test("shows a readable message when the server fails", async ({ page }) => {
 test("retries a multi-word item with fewer words", async ({ page }) => {
   const terms: string[] = [];
   await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_weighed")) return r.fulfill({ json: [] });
     if (url.includes("rpc/search_products")) {
       const term = JSON.parse(body).term as string;
       terms.push(term);
-      return r.fulfill({ json: term === "בשר טחון" ? [PRODUCT] : [] });
+      return r.fulfill({ json: term === "שמנת חמוצה" ? [PRODUCT] : [] });
     }
-    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "בשר טחון מהקצביה" } }] });
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "שמנת חמוצה טרייה" } }] });
     return listHandler(r, url, body);
   });
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".best")).toBeVisible();
-  expect(terms).toEqual(["בשר טחון מהקצביה", "בשר טחון"]);
+  expect(terms).toEqual(["שמנת חמוצה טרייה", "שמנת חמוצה"]);
+});
+
+test("choosing a product recalculates and confirms", async ({ page }) => {
+  const posted: string[] = [];
+  let baskets = 0;
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("product_preferences") && r.request().method() === "POST") posted.push(body);
+    if (url.includes("product_preferences") && r.request().method() === "GET")
+      return r.fulfill({ json: posted.length ? [JSON.parse(posted[posted.length - 1])] : [] });
+    if (url.includes("rpc/price_basket")) baskets++;
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best")).toBeVisible();
+  await page.locator(".item select").first().selectOption(PRODUCT.barcode);
+  await expect(page.getByText(/הסל חושב מחדש/)).toBeVisible();
+  expect(baskets).toBe(2);
+  expect(posted[0]).toContain(PRODUCT.barcode);
+  await page.getByText("רק המוצר הזה, בלי תחליפים").first().click();
+  await expect.poll(() => posted.length).toBe(2);
+  expect(JSON.parse(posted[1]).strict).toBe(true);
+});
+
+test("weighed items show weight and per-kg price", async ({ page }) => {
+  const meat = { ...PRODUCT, barcode: "c:1", name: "בשר בקר טחון טרי", is_weighted: true, quantity: 1, unit_of_measure: "קילוגרם" };
+  let payload = "";
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: [] });
+    if (url.includes("rpc/search_weighed")) return r.fulfill({ json: [meat] });
+    if (url.includes("rpc/price_basket")) {
+      payload = body;
+      return r.fulfill({ json: [{ ...ROWS[0], lines: [{ key: "בשר טחון", qty: 0.5, barcode: "c:1", name: meat.name, price: 64.9, total: 32.45, promo: null, promo_min_qty: null, preferred: true }] }] });
+    }
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "בשר טחון מהקצביה 500 גרם" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best")).toContainText("₪32.45");
+  expect(JSON.parse(payload).items[0]).toMatchObject({ key: "בשר טחון", qty: 0.5 });
+  await page.locator(".best summary").click();
+  await expect(page.locator(".best")).toContainText('500 גרם');
+  await expect(page.locator(".best")).toContainText('לק"ג');
 });
 
 test("empty data explains what to do", async ({ page }) => {

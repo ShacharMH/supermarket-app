@@ -101,3 +101,44 @@ describe("edge cases", () => {
     expect(parseReceiptCsv("מוצר\tכמות\nחלב\t2")[0]).toMatchObject({ name: "חלב", qty: 2 });
   });
 });
+
+describe("weighed goods", () => {
+  const w = (barcode: string): Product => ({ ...prod(barcode, 1, "קילוגרם"), is_weighted: true });
+  it("parses weights anywhere in the line", () => {
+    expect(parseList("בשר טחון 500 גרם\n1.5 ק\"ג עגבניות\nגבינה צהובה 300ג'\nקוטג 5%")).toEqual([
+      { key: "בשר טחון", qty: 1, weightKg: 0.5 },
+      { key: "עגבניות", qty: 1, weightKg: 1.5 },
+      { key: "גבינה צהובה", qty: 1, weightKg: 0.3 },
+      { key: "קוטג 5%", qty: 1 },
+    ]);
+  });
+  it("'מהקצביה' means sold by weight", () => {
+    expect(parseList("בשר טחון מהקצביה 500 גרם")).toEqual([{ key: "בשר טחון", qty: 1, weightKg: 0.5, byWeight: true }]);
+  });
+  it("prices weighed products per kg and compares them across chains", () => {
+    const results = [prod("frozen", 400, "גרם", 9), w("chainA:12"), w("chainB:77")];
+    const r = resolveItem({ key: "בשר טחון", qty: 1, weightKg: 0.5, byWeight: true }, results, [], new Map());
+    expect(r.weighted).toBe(true);
+    expect(r.qty).toBe(0.5);
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["chainA:12", "chainB:77"]);
+  });
+  it("without a counter word, a matching pack size wins", () => {
+    const results = [prod("frozen", 500, "גרם", 9), w("chainA:12")];
+    expect(resolveItem({ key: "בשר טחון", qty: 1, weightKg: 0.5 }, results, [], new Map()).reference?.barcode).toBe("frozen");
+  });
+  it("weighed item without a weight defaults to 1kg", () => {
+    expect(resolveItem({ key: "עגבניות", qty: 1 }, [w("a")], [], new Map()).qty).toBe(1);
+  });
+  it("a weight on a packaged product picks that pack size", () => {
+    const results = [prod("500g", 500, "גרם"), prod("250g", 250, "גרם")];
+    const r = resolveItem({ key: "קוטג", qty: 2, weightKg: 0.25 }, results, [], new Map());
+    expect(r.weighted).toBe(false);
+    expect(r.qty).toBe(2);
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["250g"]);
+  });
+  it("strict pin allows no substitutes", () => {
+    const results = [prod("a", 250, "גרם"), prod("b", 250, "גרם")];
+    expect(resolveItem({ key: "x", qty: 1 }, results, ["b"], new Map(), true).candidates.map((c) => c.barcode)).toEqual(["b"]);
+    expect(resolveItem({ key: "x", qty: 1 }, results, ["b"], new Map(), false).candidates).toHaveLength(2);
+  });
+});
