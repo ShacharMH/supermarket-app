@@ -88,7 +88,6 @@ test("weighed items show weight and per-kg price", async ({ page }) => {
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".best")).toContainText("₪32.45");
   expect(JSON.parse(payload).items[0]).toMatchObject({ key: "בשר טחון", qty: 0.5 });
-  await page.locator(".best summary").click();
   await expect(page.locator(".best")).toContainText('500 גרם');
   await expect(page.locator(".best")).toContainText('לק"ג');
 });
@@ -115,6 +114,25 @@ test("guesses by-weight for butcher items and lets the user switch", async ({ pa
   await expect(page.getByText(/הסל חושב מחדש/)).toBeVisible();
   expect(saved).toMatchObject({ term: "בשר טחון", mode: "pack" });
   expect(JSON.parse(payloads[1]).items[0]).toMatchObject({ qty: 1, candidates: [frozen.barcode] });
+});
+
+test("best store shows a shopping list to tick off and share", async ({ page }) => {
+  await page.addInitScript(() => {
+    (navigator as unknown as { share?: unknown }).share = undefined;
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: (t: string) => ((window as unknown as { copied: string }).copied = t, Promise.resolve()) } });
+  });
+  await mockSupabase(page, listHandler);
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  const list = page.locator(".best .shoplist li");
+  await expect(list).toHaveCount(3);
+  await expect(list.first()).toContainText("קוטג תנובה 5%");
+  await expect(list.first()).toContainText("מבצע: 2 ב-10");
+  await list.first().locator("input").check();
+  await expect(list.first()).toHaveClass(/done/);
+  await page.locator(".best").getByRole("button", { name: /שיתוף/ }).click();
+  await expect(page.locator(".best").getByRole("button", { name: "✓ הועתק" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { copied: string }).copied)).toContain("🛒 רמי לוי · רמלה");
 });
 
 test("empty data explains what to do", async ({ page }) => {

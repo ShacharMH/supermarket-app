@@ -163,3 +163,26 @@ describe("weighed goods", () => {
     expect(resolveItem({ key: "x", qty: 1 }, results, ["b"], new Map(), { strict: false }).candidates).toHaveLength(2);
   });
 });
+
+describe("shopping list", () => {
+  it("formats a shareable list with amounts, sizes, promos and substitutes", async () => {
+    const { shoppingText, shelfBarcode, packSize } = await import("./basket");
+    const products = new Map([["7290000000001", { ...prod("7290000000001", 250, "גרם"), manufacturer: "תנובה" }]]);
+    const lines = [
+      { ...line("קוטג", 10), barcode: "7290000000001", name: "קוטג 5%", qty: 2, promo: "2 ב-10" },
+      { ...line("בשר טחון", 32.45), barcode: "c:1", name: "בשר בקר טחון", qty: 0.5 },
+      { ...line("חלב", 7), name: "חלב טרה", preferred: false },
+    ];
+    expect(shoppingText("רמי לוי · רמלה", lines, new Set(["בשר טחון"]), products)).toBe(
+      [
+        "🛒 רמי לוי · רמלה",
+        "☐ 2 יח' · קוטג 5% · תנובה · 250 גרם - ₪10.00 (מבצע: 2 ב-10)",
+        "☐ 500 גרם · בשר בקר טחון - ₪32.45",
+        "☐ 1 יח' · חלב טרה - ₪7.00 (חלופה)",
+        'סה"כ משוער: ₪49.45',
+      ].join("\n"),
+    );
+    expect(shelfBarcode("c:1")).toBeNull();
+    expect(packSize(prod("x", 1, "ליטר"))).toBe("1 ליטר");
+  });
+});

@@ -378,3 +378,46 @@ export function parseReceiptCsv(text: string): ReceiptRow[] {
     return row;
   }).filter((r) => r.name);
 }
+
+// ---------------------------------------------------------------- shopping list
+
+const fmtKg = (q: number) => (q < 1 ? `${Math.round(q * 1000)} גרם` : `${+q.toFixed(2)} ק"ג`);
+
+export function packSize(p: Product | undefined): string | null {
+  if (!p || p.is_weighted || !p.quantity || p.quantity <= 0) return null;
+  const u = normUnit(p.unit_of_measure);
+  const label: Record<string, string> = { g: "גרם", kg: 'ק"ג', ml: 'מ"ל', l: "ליטר" };
+  return label[u] ? `${+p.quantity.toFixed(2)} ${label[u]}` : null;
+}
+
+/** How much to put in the cart, in words: "2 יח'" or "500 גרם". */
+export function howMuch(l: Line, weighted: boolean): string {
+  return weighted ? fmtKg(l.qty) : `${+l.qty.toFixed(2)} יח'`;
+}
+
+/** A real barcode worth showing (chain-internal codes are "chain:code"). */
+export function shelfBarcode(code: string): string | null {
+  return code.includes(":") ? null : code;
+}
+
+/** Plain-text list for sharing (WhatsApp, notes...). */
+export function shoppingText(
+  title: string,
+  lines: Line[],
+  weighted: Set<string>,
+  products: Map<string, Product>,
+): string {
+  const rows = lines.map((l) => {
+    const p = products.get(l.barcode);
+    const bits = [`☐ ${howMuch(l, weighted.has(l.key))} · ${l.name}`];
+    const size = packSize(p);
+    if (p?.manufacturer) bits.push(p.manufacturer);
+    if (size) bits.push(size);
+    let row = bits.join(" · ") + ` - ₪${l.total.toFixed(2)}`;
+    if (l.promo) row += ` (מבצע: ${l.promo})`;
+    if (!l.preferred) row += " (חלופה)";
+    return row;
+  });
+  const total = lines.reduce((s, l) => s + l.total, 0);
+  return [`🛒 ${title}`, ...rows, `סה"כ משוער: ₪${total.toFixed(2)}`].join("\n");
+}

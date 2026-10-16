@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import { loadSettings } from "../settings";
+import ShoppingList from "./ShoppingList";
 import {
   bestSplits, parseList, rankStores, resolveItem,
-  type BranchRow, type BuyMode, type Line, type Product, type ResolvedItem, type SplitOption, type StoreOption,
+  type BranchRow, type BuyMode, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
 type Result = {
@@ -20,26 +21,6 @@ function storeTitle(b: BranchRow) {
   return `${b.chain_name} · ${b.branch_name ?? ""}${b.is_online ? " (אונליין)" : ""}`;
 }
 
-const kg = (q: number) => (q < 1 ? `${Math.round(q * 1000)} גרם` : `${+q.toFixed(2)} ק"ג`);
-
-function Lines({ lines, weighted }: { lines: Line[]; weighted: Set<string> }) {
-  return (
-    <ul className="lines">
-      {lines.map((l) => (
-        <li key={l.key}>
-          <span className="lname">
-            {weighted.has(l.key) ? <b>{kg(l.qty)} · </b> : l.qty !== 1 && <b>{l.qty}× </b>}
-            {l.name}
-            {weighted.has(l.key) && <span className="muted small"> ({money(l.price)} לק"ג)</span>}
-            {!l.preferred && <span className="tag alt">חלופה</span>}
-            {l.promo && <span className="tag promo">{l.promo}</span>}
-          </span>
-          <span className="lprice">{money(l.total)}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export default function ListPage() {
   const [text, setText] = useState("");
@@ -182,6 +163,8 @@ export default function ListPage() {
   }
 
   const best = result?.stores[0];
+  const products = new Map<string, Product>();
+  for (const rs of result?.results.values() ?? []) for (const p of rs) products.set(p.barcode, p);
   const weighted = new Set(result?.items.filter((i) => i.weighted).map((i) => i.key) ?? []);
 
   return (
@@ -216,10 +199,8 @@ export default function ListPage() {
                   <div className="muted small">חוסך {money(worst.total - best.total)} לעומת הסניף היקר ביותר באזור</div>
                 ) : null;
               })()}
-              <details>
-                <summary>פירוט</summary>
-                <Lines lines={best.branch.lines} weighted={weighted} />
-              </details>
+              <h3 className="shop-title">🛒 מה לקנות</h3>
+              <ShoppingList id={`b${best.branch.branch_id}`} title={storeTitle(best.branch)} lines={best.branch.lines} weighted={weighted} products={products} />
             </section>
           ) : (
             <p className="note">לא נמצאו מחירים. בדקו שיש אזור בהגדרות ושהאיסוף הלילי רץ.</p>
@@ -235,9 +216,9 @@ export default function ListPage() {
                     <span className="save">חוסך {money(s.saving)}</span>
                   </summary>
                   <h4>{storeTitle(s.a)}</h4>
-                  <Lines lines={s.linesA} weighted={weighted} />
+                  <ShoppingList id={`s${s.a.branch_id}-${s.b.branch_id}a`} title={storeTitle(s.a)} lines={s.linesA} weighted={weighted} products={products} />
                   <h4>{storeTitle(s.b)}</h4>
-                  <Lines lines={s.linesB} weighted={weighted} />
+                  <ShoppingList id={`s${s.a.branch_id}-${s.b.branch_id}b`} title={storeTitle(s.b)} lines={s.linesB} weighted={weighted} products={products} />
                 </details>
               ))}
             </section>
@@ -257,7 +238,7 @@ export default function ListPage() {
                       </span>
                     </summary>
                     <div className="muted small">{o.branch.address} {o.branch.city}</div>
-                    <Lines lines={o.branch.lines} weighted={weighted} />
+                    <ShoppingList id={`b${o.branch.branch_id}`} title={storeTitle(o.branch)} lines={o.branch.lines} weighted={weighted} products={products} />
                     {o.missing.length > 0 && <div className="warn">חסר: {o.missing.join(", ")}</div>}
                   </details>
                 </li>
