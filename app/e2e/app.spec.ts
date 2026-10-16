@@ -15,8 +15,9 @@ test("compares a list and shows the cheapest store", async ({ page }) => {
   const best = page.locator(".best");
   await expect(best).toContainText("רמי לוי");
   await expect(best).toContainText("₪24.40");
-  await expect(page.locator(".stores > li")).toHaveCount(ROWS.length);
-  await expect(page.getByText("איך הבנתי את הרשימה")).toBeVisible();
+  await expect(page.locator(".stores .store")).toHaveCount(ROWS.length - 1); // the others, best is on top
+  await expect(page.locator(".stores .store").first()).toContainText("+₪0.30");
+  await expect(page.getByText("המוצרים ברשימה")).toBeVisible();
 });
 
 test("shows a readable message when the server fails", async ({ page }) => {
@@ -62,6 +63,7 @@ test("choosing a product recalculates and confirms", async ({ page }) => {
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".best")).toBeVisible();
+  await page.locator(".item").first().getByRole("button", { name: "שינוי" }).click();
   await page.locator(".item select").first().selectOption(PRODUCT.barcode);
   await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו");
   expect(baskets).toBe(2);
@@ -108,9 +110,11 @@ test("guesses by-weight for butcher items and lets the user switch", async ({ pa
   });
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
-  await expect(page.getByRole("button", { name: /במשקל/ })).toHaveClass(/on/);
+  await expect(page.locator(".item")).toContainText("⚖️ 500 גרם");
   expect(JSON.parse(payloads[0]).items[0]).toMatchObject({ qty: 0.5, candidates: ["c:1"] });
-  await page.getByRole("button", { name: /ארוז/ }).click();
+  await page.getByRole("button", { name: "שינוי" }).click();
+  await expect(page.getByRole("button", { name: /במשקל/ })).toHaveClass(/on/);
+  await page.getByRole("button", { name: /📦 ארוז/ }).click();
   await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו");
   expect(saved).toMatchObject({ term: "בשר טחון", mode: "pack" });
   expect(JSON.parse(payloads[1]).items[0]).toMatchObject({ qty: 1, candidates: [frozen.barcode] });
@@ -150,10 +154,12 @@ test("by-weight items always show their weight, even with no packaged option", a
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   const meatItem = page.locator(".item", { hasText: "בשר טחון" });
-  await expect(meatItem).toContainText("נקנה במשקל");
+  await expect(meatItem).toContainText("⚖️ 500 גרם");
+  await meatItem.getByRole("button", { name: "שינוי" }).click();
   await expect(meatItem.locator(".grams input")).toHaveValue("500");
   const milkItem = page.locator(".item", { hasText: "חלב 3%" });
-  await expect(milkItem).toContainText("ארוז");
+  await expect(milkItem).toContainText("📦 1 יח'");
+  await milkItem.getByRole("button", { name: "שינוי" }).click();
   await expect(milkItem.locator(".seg")).toHaveCount(0);
   expect(weighedTerms).not.toContain("חלב"); // never relaxed to a single word
 });

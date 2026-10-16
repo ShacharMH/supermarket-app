@@ -10,6 +10,7 @@ import {
 
 type Result = {
   strict: Set<string>;
+  pinned: Set<string>; // terms with a product the user picked (vs. inferred from receipts)
   items: ResolvedItem[];
   results: Map<string, Product[]>;
   stores: StoreOption[];
@@ -17,6 +18,15 @@ type Result = {
 };
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
+
+const kgLabel = (q: number) => (q < 1 ? `${Math.round(q * 1000)} גרם` : `${+q.toFixed(2)} ק"ג`);
+
+function navUrl(b: BranchRow) {
+  const q = [b.address, b.city].filter(Boolean).join(", ");
+  return b.lat && b.lon
+    ? `https://www.google.com/maps/search/?api=1&query=${b.lat},${b.lon}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.chain_name} ${q}`)}`;
+}
 
 function storeTitle(b: BranchRow) {
   return `${b.chain_name} · ${b.branch_name ?? ""}${b.is_online ? " (אונליין)" : ""}`;
@@ -32,6 +42,8 @@ export default function ListPage() {
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [tracked, setTracked] = useState<number | null>(null);
   // a toast pinned above the tab bar, visible wherever the user has scrolled to
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [notice, setNotice] = useState<{ text: string; done: boolean } | null>(null);
   const noticeTimer = useRef<number | undefined>(undefined);
   const saveTimer = useRef<number | undefined>(undefined);
@@ -174,7 +186,7 @@ export default function ListPage() {
       const keys = resolved.map((r) => r.key);
       const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee });
       const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
-      setResult({ items: resolved, results, stores, splits, strict });
+      setResult({ items: resolved, results, stores, splits, strict, pinned: new Set(pinned.keys()) });
       return stores[0];
     } catch (e) {
       setError(errorText(e));
@@ -244,33 +256,150 @@ export default function ListPage() {
             <section className="card best">
               <div className="kicker">הכי משתלם</div>
               <h2>{storeTitle(best.branch)}</h2>
-              <div className="muted">{best.branch.address} {best.branch.city}</div>
-              <div className="big">{money(best.total)}</div>
+              <div className="best-row">
+                <div className="big">{money(best.total)}</div>
+                {(() => {
+                  // compare with stores that carry the same number of list items
+                  const peers = result.stores.filter((o) => o.missing.length === best.missing.length);
+                  const avg = peers.reduce((t, o) => t + o.total, 0) / peers.length;
+                  return peers.length > 1 && avg - best.total >= 0.5 ? (
+                    <div className="save-badge">חוסך {money(avg - best.total)} מהממוצע</div>
+                  ) : null;
+                })()}
+              </div>
               {best.deliveryFee > 0 && <div className="muted small">כולל משלוח {money(best.deliveryFee)}</div>}
-              {best.missing.length > 0 && <div className="warn">חסר: {best.missing.join(", ")}</div>}
-              {(() => {
-                // compare only against stores that are equally complete
-                const peers = result.stores.filter((o) => o.missing.length === best.missing.length);
-                const worst = peers[peers.length - 1];
-                return worst && worst !== best ? (
-                  <div className="muted small">חוסך {money(worst.total - best.total)} לעומת הסניף היקר ביותר באזור</div>
-                ) : null;
-              })()}
-              <h3 className="shop-title">🛒 מה לקנות</h3>
-              <ShoppingList id={`b${best.branch.branch_id}`} title={storeTitle(best.branch)} lines={best.branch.lines} weighted={weighted} products={products} />
+              {best.missing.length > 0 && <div className="warn">אין כאן: {best.missing.join(", ")}</div>}
+              {!best.branch.is_online && (
+                <a className="nav-link" href={navUrl(best.branch)} target="_blank" rel="noreferrer">
+                  📍 {[best.branch.address, best.branch.city].filter(Boolean).join(", ")} · ניווט
+                </a>
+              )}
+              <details className="shop-details" open>
+                <summary>
+                  <span className="shop-title">🛒 מה לקנות ({best.branch.lines.length})</span>
+                </summary>
+                <ShoppingList id={`b${best.branch.branch_id}`} title={storeTitle(best.branch)} lines={best.branch.lines} weighted={weighted} products={products} />
+              </details>
             </section>
           ) : (
             <p className="note">לא נמצאו מחירים. בדקו שיש אזור בהגדרות ושהאיסוף הלילי רץ.</p>
           )}
 
+          <section className="card">
+            <div className="sec-head">
+              <h3>המוצרים ברשימה</h3>
+              <details className="help">
+                <summary aria-label="איך זה עובד">?</summary>
+                <p className="muted small">
+                  האפליקציה מנחשת אם קונים במשקל (ירקות, קצביה, מעדנייה) או ארוז, ובאיזו כמות. "שינוי" מאפשר לבחור מוצר
+                  מסוים או אופן קנייה, והבחירה נשמרת לפעם הבאה. מוצר אחר ייבחר רק אם הוא זול ביותר מהסף שבהגדרות, אלא אם
+                  מסמנים "בלי תחליפים". כל שינוי מחשב את הסל מחדש.
+                </p>
+              </details>
+            </div>
+            <ul className="items">
+              {result.items.map((it) => {
+                const rs = result.results.get(it.key) ?? [];
+                const chosen = rs.find((p) => p.barcode === it.preferred[0]);
+                const pinned = result.pinned.has(it.key);
+                const both = rs.some((r) => r.is_weighted) && rs.some((r) => !r.is_weighted);
+                const open = editing === it.key;
+                return (
+                  <li key={it.key} className={`item ${open ? "open" : ""}`}>
+                    <div className="item-row">
+                      <div className="item-main">
+                        <div className="ikey">{it.key}</div>
+                        <div className="item-sum">
+                          {!rs.length ? (
+                            <span className="warn">לא נמצא מוצר תואם</span>
+                          ) : (
+                            <>
+                              <span className="chip">{it.weighted ? `⚖️ ${kgLabel(it.qty)}` : `📦 ${+it.qty.toFixed(2)} יח'`}</span>
+                              <span className="muted">
+                                {chosen ? (pinned ? `${chosen.name}${result.strict.has(it.key) ? " בלבד" : ""}` : `כמו בקבלות: ${chosen.name}`) : "הכי זול מבין הדומים"}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      {rs.length > 0 && (
+                        <button className="edit-btn" aria-expanded={open} onClick={() => setEditing(open ? null : it.key)}>
+                          {open ? "סגירה" : "שינוי"}
+                        </button>
+                      )}
+                    </div>
+                    {open && (
+                      <div className="item-edit">
+                        {both && (
+                          <div className="seg" role="group" aria-label="אופן קנייה">
+                            <button className={it.weighted ? "on" : ""} onClick={() => !it.weighted && setTerm(it.key, { mode: "weight" })}>
+                              ⚖️ במשקל
+                            </button>
+                            <button className={!it.weighted ? "on" : ""} onClick={() => it.weighted && setTerm(it.key, { mode: "pack" })}>
+                              📦 ארוז
+                            </button>
+                          </div>
+                        )}
+                        {it.weighted && (
+                          <label className="grams">
+                            כמות:
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={50}
+                              step={50}
+                              defaultValue={Math.round(it.qty * 1000)}
+                              key={`${it.key}-${it.qty}`}
+                              onBlur={(e) => {
+                                const g = Number(e.target.value);
+                                if (g > 0 && Math.abs(g / 1000 - it.qty) > 0.001) setTerm(it.key, { mode: "weight", weight_kg: g / 1000 });
+                              }}
+                            />
+                            גרם
+                          </label>
+                        )}
+                        <select aria-label={`איזה מוצר עבור ${it.key}`} value={pinned ? it.preferred[0] : ""} onChange={(e) => pin(it.key, e.target.value)}>
+                          <option value="">כל מוצר דומה (הכי זול)</option>
+                          {rs.map((p) => (
+                            <option key={p.barcode} value={p.barcode}>
+                              {p.name}
+                              {maker(p) ? ` · ${maker(p)}` : ""} · {money(p.min_price)}
+                              {p.max_price !== p.min_price ? `-${money(p.max_price)}` : ""}
+                              {p.is_weighted ? ' לק"ג' : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {pinned && (
+                          <label className="strict">
+                            <input
+                              type="checkbox"
+                              checked={result.strict.has(it.key)}
+                              onChange={(e) => pin(it.key, it.preferred[0], e.target.checked)}
+                            />
+                            רק המוצר הזה, בלי תחליפים
+                          </label>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <button disabled={busy} onClick={() => recalc("הסל חושב מחדש", async () => {})}>
+              {busy ? "מחשב..." : "🔄 חשב שוב את הסל"}
+            </button>
+          </section>
+
           {result.splits.length > 0 && (
             <section className="card">
-              <h3>פיצול בין שני סופרים</h3>
+              <h3>אפשר לחסוך עוד בשני סופרים</h3>
               {result.splits.map((s) => (
-                <details key={`${s.a.branch_id}-${s.b.branch_id}`}>
+                <details key={`${s.a.branch_id}-${s.b.branch_id}`} className="store">
                   <summary>
-                    {s.a.chain_name} {s.a.branch_name} + {s.b.chain_name} {s.b.branch_name}: <b>{money(s.total)}</b>{" "}
-                    <span className="save">חוסך {money(s.saving)}</span>
+                    <span className="store-name">{s.a.chain_name} {s.a.branch_name} + {s.b.chain_name} {s.b.branch_name}</span>
+                    <span className="store-price">
+                      {money(s.total)} <span className="save">−{money(s.saving)}</span>
+                    </span>
                   </summary>
                   <h4>{storeTitle(s.a)}</h4>
                   <ShoppingList id={`s${s.a.branch_id}-${s.b.branch_id}a`} title={storeTitle(s.a)} lines={s.linesA} weighted={weighted} products={products} />
@@ -281,107 +410,56 @@ export default function ListPage() {
             </section>
           )}
 
-          <section className="card">
-            <h3>כל הסניפים</h3>
-            <ol className="stores">
-              {result.stores.map((o) => (
-                <li key={o.branch.branch_id}>
-                  <details>
-                    <summary>
-                      <span>{storeTitle(o.branch)}</span>
-                      <span className="sprice">
-                        {money(o.total)}
-                        {o.missing.length > 0 && <span className="tag miss">חסרים {o.missing.length}</span>}
-                      </span>
-                    </summary>
-                    <div className="muted small">{o.branch.address} {o.branch.city}</div>
-                    <ShoppingList id={`b${o.branch.branch_id}`} title={storeTitle(o.branch)} lines={o.branch.lines} weighted={weighted} products={products} />
-                    {o.missing.length > 0 && <div className="warn">חסר: {o.missing.join(", ")}</div>}
+          {result.stores.length > 1 && best && (() => {
+            const others = result.stores.slice(1);
+            const complete = others.filter((o) => o.missing.length === best.missing.length);
+            const partial = others.filter((o) => o.missing.length !== best.missing.length);
+            const shown = showAll ? complete : complete.slice(0, 5);
+            const row = (o: StoreOption) => (
+              <details key={o.branch.branch_id} className="store">
+                <summary>
+                  <span className="store-name">
+                    {storeTitle(o.branch)}
+                    {o.branch.city && <span className="muted small"> · {o.branch.city}</span>}
+                  </span>
+                  <span className="store-price">
+                    {o.missing.length === best.missing.length ? (
+                      <span className="diff">+{money(o.total - best.total)}</span>
+                    ) : (
+                      <>
+                        {money(o.total)} <span className="tag miss">חסרים {o.missing.length}</span>
+                      </>
+                    )}
+                  </span>
+                </summary>
+                {!o.branch.is_online && (
+                  <a className="nav-link" href={navUrl(o.branch)} target="_blank" rel="noreferrer">
+                    📍 {[o.branch.address, o.branch.city].filter(Boolean).join(", ")} · ניווט
+                  </a>
+                )}
+                <ShoppingList id={`b${o.branch.branch_id}`} title={storeTitle(o.branch)} lines={o.branch.lines} weighted={weighted} products={products} />
+                {o.missing.length > 0 && <div className="warn">אין כאן: {o.missing.join(", ")}</div>}
+              </details>
+            );
+            return (
+              <section className="card">
+                <h3>סניפים נוספים</h3>
+                <p className="muted small">כמה יותר יעלה אותו סל בכל סניף</p>
+                <div className="stores">{shown.map(row)}</div>
+                {complete.length > 5 && (
+                  <button className="link" onClick={() => setShowAll(!showAll)}>
+                    {showAll ? "פחות" : `הצגת כל ${complete.length} הסניפים`}
+                  </button>
+                )}
+                {partial.length > 0 && (
+                  <details className="partial">
+                    <summary className="muted">{partial.length} סניפים שחסרים בהם מוצרים מהרשימה</summary>
+                    <div className="stores">{partial.map(row)}</div>
                   </details>
-                </li>
-              ))}
-            </ol>
-          </section>
-
-          <section className="card">
-            <h3>איך הבנתי את הרשימה</h3>
-            <p className="muted small">
-              האפליקציה מנחשת אם קונים במשקל (ירקות, קצביה, מעדנייה) או ארוז, ובאיזו כמות. אם הניחוש לא נכון, משנים כאן
-              והבחירה נשמרת לפעם הבאה. בחירה של מוצר ספציפי הופכת אותו למועדף. מוצר אחר ייבחר רק אם הוא זול ממנו ביותר
-              מהסף שבהגדרות, אלא אם מסמנים "בלי תחליפים". כל שינוי כאן מחשב את הסל מחדש מיד.
-            </p>
-            {result.items.map((it) => (
-              <div key={it.key} className="item">
-                <div className="ikey">{it.key}</div>
-                {(() => {
-                  const rs = result.results.get(it.key) ?? [];
-                  if (!rs.length) return null;
-                  const both = rs.some((r) => r.is_weighted) && rs.some((r) => !r.is_weighted);
-                  return (
-                    <div className="row mode">
-                      {both ? (
-                        <div className="seg" role="group" aria-label="אופן קנייה">
-                          <button className={it.weighted ? "on" : ""} onClick={() => !it.weighted && setTerm(it.key, { mode: "weight" })}>
-                            ⚖️ במשקל
-                          </button>
-                          <button className={!it.weighted ? "on" : ""} onClick={() => it.weighted && setTerm(it.key, { mode: "pack" })}>
-                            📦 ארוז
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="tag alt">{it.weighted ? "⚖️ נקנה במשקל" : "📦 ארוז"}</span>
-                      )}
-                      {it.weighted && (
-                        <label className="grams">
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            min={50}
-                            step={50}
-                            defaultValue={Math.round(it.qty * 1000)}
-                            key={`${it.key}-${it.qty}`}
-                            onBlur={(e) => {
-                              const g = Number(e.target.value);
-                              if (g > 0 && Math.abs(g / 1000 - it.qty) > 0.001) setTerm(it.key, { mode: "weight", weight_kg: g / 1000 });
-                            }}
-                          />
-                          גרם
-                        </label>
-                      )}
-                    </div>
-                  );
-                })()}
-                {(result.results.get(it.key) ?? []).length === 0 ? (
-                  <div className="warn">לא נמצא מוצר תואם</div>
-                ) : (
-                  <select aria-label={`איזה מוצר עבור ${it.key}`} value={it.preferred[0] ?? ""} onChange={(e) => pin(it.key, e.target.value)}>
-                    <option value="">כל מוצר דומה (הכי זול)</option>
-                    {(result.results.get(it.key) ?? []).map((p) => (
-                      <option key={p.barcode} value={p.barcode}>
-                        {p.name}
-                        {maker(p) ? ` · ${maker(p)}` : ""} · {money(p.min_price)}
-                        {p.max_price !== p.min_price ? `-${money(p.max_price)}` : ""}
-                        {p.is_weighted ? ' לק"ג' : ""}
-                      </option>
-                    ))}
-                  </select>
                 )}
-                {it.preferred[0] && result.strict !== undefined && (
-                  <label className="strict">
-                    <input
-                      type="checkbox"
-                      checked={result.strict.has(it.key)}
-                      onChange={(e) => pin(it.key, it.preferred[0], e.target.checked)}
-                    />
-                    רק המוצר הזה, בלי תחליפים
-                  </label>
-                )}
-              </div>
-            ))}
-            <button className="primary" disabled={busy} onClick={() => recalc("הסל חושב מחדש", async () => {})}>
-              {busy ? "מחשב..." : "🔄 חשב שוב את הסל"}
-            </button>
-          </section>
+              </section>
+            );
+          })()}
         </>
       )}
     </div>
