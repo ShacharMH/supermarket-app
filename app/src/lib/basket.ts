@@ -144,7 +144,26 @@ function normUnit(u: string | null): string {
   return s;
 }
 
+// pack size written in a product name: "4 ל'", "1.5ל", "250ג'", "750 מ\"ל", "1 ליט"
+const NAME_SIZE_RE = /(\d+(?:\.\d+)?)\s*(ק"ג|ק״ג|קג|קילו|גרם|גר|ג|ליטר|ליט|ל|מ"ל|מ״ל|מל)(?=[\s'"׳״.,)\-]|$)/g;
+
+function nameAmount(name: string): [string, number] | null {
+  const all = [...name.matchAll(NAME_SIZE_RE)];
+  const m = all[all.length - 1];
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const u = m[2].replace(/["״]/g, "");
+  if (/^(קג|קילו)$/.test(u)) return ["g", n * 1000];
+  if (/^(גרם|גר|ג)$/.test(u)) return ["g", n];
+  if (/^(ליטר|ליט|ל)$/.test(u)) return ["ml", n * 1000];
+  return ["ml", n];
+}
+
 function baseAmount(p: Product): [string, number] | null {
+  // the name is more reliable than the published unit, which is often wrong
+  // ("גרם" for a 4-litre bottle) or missing ("לא ידוע")
+  const fromName = nameAmount(p.name);
+  if (fromName) return fromName;
   if (p.quantity == null || p.quantity <= 0) return null;
   const u = normUnit(p.unit_of_measure);
   if (u === "kg") return ["g", p.quantity * 1000];

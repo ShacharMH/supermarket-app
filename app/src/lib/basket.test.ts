@@ -206,3 +206,22 @@ describe("pack sizes in the list", () => {
     expect(r.reference?.barcode).toBe("big4");
   });
 });
+
+describe("pack size from the product name", () => {
+  const named = (barcode: string, name: string, q: number | null, u: string | null): Product => ({ ...prod(barcode, q, u), name });
+  it("trusts the name over a wrong or missing unit", () => {
+    const results = [
+      named("touch", "אקונומיקה סמיכה בניחוח לימון 4 ל' טאצ'", 4000, "מיליליטר"),
+      named("kings", "אקונומיקה ריחנית 4 ל' קינגז הום", 4000, "גרם"),
+      named("plain", "אקונומיקה מבושמת 4 ל", 4000, "לא ידוע"),
+      named("sano1", "סנו JAVEL אקונומיקה בריח לימון 1 ליט", 1000, 'מ"ל'),
+      named("small", "סיף ג'ל אקונומיקה 750 מ\"ל", 750, 'מ"ל'),
+    ];
+    const r = resolveItem({ key: "אקונומיקה", qty: 1, volumeL: 5 }, results, [], new Map());
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["touch", "kings", "plain"]);
+  });
+  it("reads gram sizes glued to the number", () => {
+    const results = [named("a", "קוטג' 5% 250ג'", 1, "יחידות"), named("b", "קוטג 5% 500 גרם", 500, "גרם")];
+    expect(resolveItem({ key: "קוטג", qty: 1, weightKg: 0.25 }, results, [], new Map()).reference?.barcode).toBe("a");
+  });
+});
