@@ -1,0 +1,37 @@
+name: Ingest prices
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # every night, ~06:17 Israel time
+  workflow_dispatch:
+    inputs:
+      chains:
+        description: "Optional comma-separated scraper names (e.g. SHUFERSAL,RAMI_LEVY)"
+        required: false
+      skip_stores:
+        description: "Skip re-downloading store lists (1 = skip)"
+        required: false
+        default: "0"
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ingest/requirements.txt
+      - run: pip install -r ingest/requirements.txt
+      - name: Run ingestion
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          CHAINS: ${{ inputs.chains }}
+          SKIP_STORES: ${{ inputs.skip_stores }}
+        run: python ingest/ingest.py
