@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -33,6 +34,10 @@ CITY_MARGIN_KM = 4
 MAX_PER_CHAIN_PER_AREA = int(os.environ.get("MAX_PER_CHAIN_PER_AREA", "2"))
 MAX_PER_AREA = int(os.environ.get("MAX_PER_AREA", "30"))
 MAX_DB_MB = int(os.environ.get("MAX_DB_MB", "400"))
+# Chains are downloaded in parallel; loading into the DB stays sequential.
+DOWNLOAD_WORKERS = int(os.environ.get("DOWNLOAD_WORKERS", "6"))
+# Store lists rarely change: on scheduled runs refresh them only weekly.
+STORES_MAX_AGE_DAYS = 6
 # Convenience / pharmacy / factory-outlet chains - not useful for a weekly basket.
 SKIP_SCRAPERS = {"YELLOW", "DOR_ALON", "GOOD_PHARM", "SUPER_PHARM", "BAREKET"}
 MAX_PROMO_ITEMS = 3000
@@ -105,9 +110,11 @@ def active_chains() -> list[ScraperFactory]:
 def ingest_stores(conn, chains, city_codes) -> dict[str, str]:
     """Upsert chains+branches. Returns {chain_id: scraper name}."""
     chain_map: dict[str, str] = {}
-    for enum in chains:
+    with ThreadPoolExecutor(DOWNLOAD_WORKERS) as pool:
+        futures = {pool.submit(fetch, enum, [FileTypesFilters.STORE_FILE.name]): enum for enum in chains}
+        downloaded = [(futures[f], f.result()) for f in as_completed(futures)]
+    for enum, paths in downloaded:
         log(f"stores: {enum.name}")
-        paths = fetch(enum, [FileTypesFilters.STORE_FILE.name])
         if not paths:
             log(f"  no store file for {enum.name}")
             continue
@@ -368,30 +375,52 @@ def ingest_prices(conn, tracked_rows) -> None:
     for bid, store_id, scraper, chain_id in tracked_rows:
         by_scraper.setdefault(scraper, []).append((bid, store_id, chain_id))
 
-    for scraper, branches in by_scraper.items():
-        enum = getattr(ScraperFactory, scraper)
+    def download(scraper: str, branches: list[tuple]) -> list[str]:
         ids = "|".join(f"0*{int(s)}" for _b, s, _c in branches)
         regex = rf"-({ids})-\d{{8}}"
-        log(f"prices: {scraper} ({len(branches)} branches)")
-        paths = fetch(enum, [FileTypesFilters.PRICE_FULL_FILE.name, FileTypesFilters.PROMO_FULL_FILE.name], regex)
-        for bid, store_id, chain_id in branches:
-            if db_size_mb(conn) > MAX_DB_MB:
-                log(f"database above {MAX_DB_MB}MB - stopping price loading")
-                return
-            pat = re.compile(rf"-0*{int(store_id)}-\d{{8}}", re.I)
-            mine = [p for p in paths if pat.search(os.path.basename(p))]
-            price_files = [p for p in mine if "pricefull" in os.path.basename(p).lower()]
-            promo_files = [p for p in mine if "promofull" in os.path.basename(p).lower()]
-            if price_files:
-                _meta, items = parse_prices(price_files[0])
-                load_prices(conn, bid, items)
-                log(f"  store {store_id}: {len(items)} prices")
-            else:
-                log(f"  store {store_id}: no price file found")
-            if promo_files:
-                _meta, promos = parse_promos(promo_files[0])
-                load_promos(conn, bid, chain_id, promos)
-                log(f"  store {store_id}: {len(promos)} promotions")
+        log(f"downloading prices: {scraper} ({len(branches)} branches)")
+        enum = getattr(ScraperFactory, scraper)
+        return fetch(enum, [FileTypesFilters.PRICE_FULL_FILE.name, FileTypesFilters.PROMO_FULL_FILE.name], regex)
+
+    with ThreadPoolExecutor(DOWNLOAD_WORKERS) as pool:
+        futures = {pool.submit(download, sc, br): sc for sc, br in by_scraper.items()}
+        for fut in as_completed(futures):
+            scraper = futures[fut]
+            try:
+                paths = fut.result()
+            except Exception as e:  # noqa: BLE001
+                log(f"prices: {scraper} download failed: {e!r}")
+                continue
+            log(f"prices: {scraper} - loading {len(paths)} files")
+            for bid, store_id, chain_id in by_scraper[scraper]:
+                if db_size_mb(conn) > MAX_DB_MB:
+                    log(f"database above {MAX_DB_MB}MB - skipping {scraper} {store_id}")
+                    continue
+                pat = re.compile(rf"-0*{int(store_id)}-\d{{8}}", re.I)
+                mine = [p for p in paths if pat.search(os.path.basename(p))]
+                price_files = [p for p in mine if "pricefull" in os.path.basename(p).lower()]
+                promo_files = [p for p in mine if "promofull" in os.path.basename(p).lower()]
+                try:
+                    if price_files:
+                        _meta, items = parse_prices(price_files[0])
+                        load_prices(conn, bid, items)
+                        log(f"  store {store_id}: {len(items)} prices")
+                    else:
+                        log(f"  store {store_id}: no price file found")
+                    if promo_files:
+                        _meta, promos = parse_promos(promo_files[0])
+                        load_promos(conn, bid, chain_id, promos)
+                        log(f"  store {store_id}: {len(promos)} promotions")
+                except Exception as e:  # noqa: BLE001 - one bad file must not stop the run
+                    conn.rollback()
+                    log(f"  store {store_id}: failed to load: {e!r}")
+
+
+def stores_are_fresh(conn) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("select coalesce(max(updated_at) > now() - make_interval(days => %s), false) from chains",
+                    (STORES_MAX_AGE_DAYS,))
+        return bool(cur.fetchone()[0])
 
 
 def main() -> None:
@@ -404,8 +433,12 @@ def main() -> None:
         conn.commit()
         status, note = "ok", None
         try:
-            if os.environ.get("SKIP_STORES") != "1":
+            # SKIP_STORES: "1" = skip, "0" = force refresh, unset (scheduled) = weekly
+            mode = (os.environ.get("SKIP_STORES") or "").strip()
+            if mode == "0" or (mode != "1" and not stores_are_fresh(conn)):
                 ingest_stores(conn, chains, load_city_codes())
+            else:
+                log("skipping store lists (fresh enough)")
             tracked = select_tracked(conn)
             ingest_prices(conn, tracked)
         except Exception as e:  # noqa: BLE001

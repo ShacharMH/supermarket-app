@@ -9,9 +9,9 @@ on:
         description: "Optional comma-separated scraper names (e.g. SHUFERSAL,RAMI_LEVY)"
         required: false
       skip_stores:
-        description: "Skip re-downloading store lists (1 = skip)"
+        description: "Store lists: 1 = skip, 0 = refresh now, empty = only if older than a week"
         required: false
-        default: "0"
+        default: ""
 
 concurrency:
   group: ingest
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
