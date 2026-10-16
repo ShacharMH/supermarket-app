@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { howMuch, packSize, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
+import { howMuch, maker, packSize, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
 
@@ -70,10 +70,15 @@ export default function ShoppingList({
                     <b>{howMuch(l, isW)}</b> · {l.name}
                   </span>
                   <span className="sl-meta">
-                    {[p?.manufacturer, size, isW ? `${money(l.price)} לק"ג` : l.qty !== 1 ? `${money(l.price)} ליח'` : null]
+                    {[maker(p), size, isW ? `${money(l.price)} לק"ג` : l.qty !== 1 ? `${money(l.price)} ליח'` : null]
                       .filter(Boolean)
                       .join(" · ")}
-                    {code && <span className="sl-code"> · ברקוד {code}</span>}
+                    {code && (
+                      <span>
+                        {" · ברקוד "}
+                        <bdi className="sl-code">{code}</bdi>
+                      </span>
+                    )}
                   </span>
                   <span className="sl-tags">
                     <span className="muted small">עבור "{l.key}"</span>

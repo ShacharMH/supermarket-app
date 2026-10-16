@@ -186,3 +186,23 @@ describe("shopping list", () => {
     expect(packSize(prod("x", 1, "ליטר"))).toBe("1 ליטר");
   });
 });
+
+describe("pack sizes in the list", () => {
+  it("reads volumes as a pack size", () => {
+    expect(parseList("אקונומיקה 5 ליטר\nשמן 1.5 ל'\nמיץ 750 מ\"ל")).toEqual([
+      { key: "אקונומיקה", qty: 1, volumeL: 5 },
+      { key: "שמן", qty: 1, volumeL: 1.5 },
+      { key: "מיץ", qty: 1, volumeL: 0.75 },
+    ]);
+  });
+  it("picks the closest pack size and only similar sizes", () => {
+    const results = [prod("small", 500, 'מ"ל', 20), prod("big4", 4, "ליטר"), prod("big5", 5000, "מל"), prod("1l", 1, "ליטר")];
+    const r = resolveItem({ key: "אקונומיקה", qty: 1, volumeL: 5 }, results, [], new Map());
+    expect(r.reference?.barcode).toBe("big5");
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["big4", "big5"]);
+  });
+  it("falls back to the nearest size when the exact one is missing", () => {
+    const r = resolveItem({ key: "אקונומיקה", qty: 1, volumeL: 5 }, [prod("small", 500, 'מ"ל'), prod("big4", 4, "ליטר")], [], new Map());
+    expect(r.reference?.barcode).toBe("big4");
+  });
+});

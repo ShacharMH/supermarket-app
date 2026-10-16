@@ -1,7 +1,7 @@
 // Pure shopping-basket logic (no I/O) so it can be unit-tested.
 
 /** key: what to search for (and pin preferences by); qty: count, or kg for weighed items. */
-export type ListItem = { key: string; qty: number; weightKg?: number; byWeight?: boolean };
+export type ListItem = { key: string; qty: number; weightKg?: number; volumeL?: number; byWeight?: boolean };
 
 // Words that say "from the counter, sold by weight" - they never appear in product names.
 const BY_WEIGHT_RE = /(^|\s)(מה?קצביה|מה?אטליז|מה?מעדניה|מה?מעדנייה|מהדלפק|במשקל|שקילה?)(?=\s|$)/g;
@@ -73,6 +73,13 @@ export type SplitOption = {
 // "500 גרם", "1.5 ק"ג", "300ג'", "2 קילו" anywhere in the line
 const WEIGHT_RE = /(\d+(?:[.,]\d+)?)\s*(ק"ג|ק״ג|קג|קילוגרם|קילו|kg|גרם|גר'?|ג'|ג׳|gr|g)(?=\s|$)/i;
 
+// "5 ליטר", "1.5 ל'", "750 מ\"ל" - a pack size (liquids are never sold by weight)
+const VOLUME_RE = /(\d+(?:[.,]\d+)?)\s*(ליטרים|ליטר|ל'|ל׳|מ"ל|מ״ל|מל|מיליליטר|ml|lt|l)(?=\s|$)/i;
+
+function toLitres(amount: number, unit: string): number {
+  return /^(ליטרים|ליטר|ל'|ל׳|lt|l)$/i.test(unit) ? amount : amount / 1000;
+}
+
 function toKg(amount: number, unit: string): number {
   return /^(ק"ג|ק״ג|קג|קילוגרם|קילו|kg)$/i.test(unit) ? amount : amount / 1000;
 }
@@ -89,6 +96,12 @@ export function parseList(text: string): ListItem[] {
     if (w) {
       weightKg = toKg(parseFloat(w[1].replace(",", ".")), w[2]);
       line = (line.slice(0, w.index) + line.slice((w.index ?? 0) + w[0].length)).replace(/\s+/g, " ").trim();
+    }
+    let volumeL: number | undefined;
+    const v = weightKg ? null : line.match(VOLUME_RE);
+    if (v) {
+      volumeL = toLitres(parseFloat(v[1].replace(",", ".")), v[2]);
+      line = (line.slice(0, v.index) + line.slice((v.index ?? 0) + v[0].length)).replace(/\s+/g, " ").trim();
     }
     let byWeight = false;
     if (line.match(BY_WEIGHT_RE)) {
@@ -108,6 +121,7 @@ export function parseList(text: string): ListItem[] {
     if (!line) continue;
     const item: ListItem = { key: line.trim(), qty: qty > 0 ? qty : 1 };
     if (weightKg) item.weightKg = weightKg;
+    if (volumeL) item.volumeL = volumeL;
     if (byWeight) item.byWeight = true;
     out.push(item);
   }
@@ -149,11 +163,22 @@ export function similarSize(a: Product, b: Product): boolean {
   return ratio >= 0.75 && ratio <= 1.334;
 }
 
-/**
- * Decide which products may fill a list item.
- * - pinned: barcodes the user explicitly chose for this term
- * - bought: barcodes from receipt history (barcode -> times bought)
- */
+/** The product whose pack size is closest to the requested one (same unit), if any. */
+function closestPack(pool: Product[], [unit, amount]: [string, number]): Product | null {
+  let best: Product | null = null;
+  let bestRatio = Infinity;
+  for (const p of pool) {
+    const a = baseAmount(p);
+    if (!a || a[0] !== unit) continue;
+    const ratio = Math.max(a[1], amount) / Math.min(a[1], amount);
+    if (ratio < bestRatio) {
+      best = p;
+      bestRatio = ratio;
+    }
+  }
+  return best;
+}
+
 export type BuyMode = "weight" | "pack";
 
 // What people usually buy by weight, with a sensible default amount (kg).
@@ -225,10 +250,9 @@ export function resolveItem(
 
   const pool = mode === "weight" ? weighed : packed;
   let reference = pool.find((r) => r.barcode === preferred[0]) ?? null;
-  if (!reference && mode === "pack" && item.weightKg) {
-    // "קוטג 250 גרם": the pack closest to that size
-    const target: Product = { ...pool[0], quantity: item.weightKg * 1000, unit_of_measure: "גרם" };
-    reference = pool.find((r) => similarSize(r, target)) ?? null;
+  if (!reference && mode === "pack" && (item.weightKg || item.volumeL)) {
+    // "קוטג 250 גרם", "אקונומיקה 5 ליטר": the pack closest to that size
+    reference = closestPack(pool, item.volumeL ? ["ml", item.volumeL * 1000] : ["g", item.weightKg! * 1000]);
   }
   reference ??= pool[0];
   const weighted = mode === "weight";
@@ -395,6 +419,14 @@ export function howMuch(l: Line, weighted: boolean): string {
   return weighted ? fmtKg(l.qty) : `${+l.qty.toFixed(2)} יח'`;
 }
 
+const UNKNOWN_MAKER = /^(לא ידוע|כללי|tbd|unknown|,|-|0)?$/i;
+
+/** The manufacturer, unless the chain published a placeholder. */
+export function maker(p: Product | undefined): string | null {
+  const m = p?.manufacturer?.trim();
+  return m && !UNKNOWN_MAKER.test(m) ? m : null;
+}
+
 /** A real barcode worth showing (chain-internal codes are "chain:code"). */
 export function shelfBarcode(code: string): string | null {
   return code.includes(":") ? null : code;
@@ -411,7 +443,8 @@ export function shoppingText(
     const p = products.get(l.barcode);
     const bits = [`☐ ${howMuch(l, weighted.has(l.key))} · ${l.name}`];
     const size = packSize(p);
-    if (p?.manufacturer) bits.push(p.manufacturer);
+    const m = maker(p);
+    if (m) bits.push(m);
     if (size) bits.push(size);
     let row = bits.join(" · ") + ` - ₪${l.total.toFixed(2)}`;
     if (l.promo) row += ` (מבצע: ${l.promo})`;

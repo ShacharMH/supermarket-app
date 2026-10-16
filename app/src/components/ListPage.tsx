@@ -4,7 +4,7 @@ import { loadSettings } from "../settings";
 import ShoppingList from "./ShoppingList";
 import { errorText } from "../lib/errors";
 import {
-  bestSplits, parseList, rankStores, resolveItem,
+  bestSplits, maker, parseList, rankStores, resolveItem,
   type BranchRow, type BuyMode, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
@@ -344,7 +344,7 @@ export default function ListPage() {
                     {(result.results.get(it.key) ?? []).map((p) => (
                       <option key={p.barcode} value={p.barcode}>
                         {p.name}
-                        {p.manufacturer ? ` · ${p.manufacturer}` : ""} · {money(p.min_price)}
+                        {maker(p) ? ` · ${maker(p)}` : ""} · {money(p.min_price)}
                         {p.max_price !== p.min_price ? `-${money(p.max_price)}` : ""}
                         {p.is_weighted ? ' לק"ג' : ""}
                       </option>

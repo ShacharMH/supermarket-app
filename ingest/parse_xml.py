@@ -137,7 +137,7 @@ def norm_barcode(code: str, chain_id: str | None) -> str:
     return f"{chain_id or 'x'}:{code}"
 
 
-UNKNOWN = {"לא ידוע", "לא ידוע.", "unknown", "כללי", "-", "0"}
+UNKNOWN = {"לא ידוע", "לא ידוע.", "unknown", "כללי", "-", "0", "tbd", ",", ""}
 
 
 def _known(v: str | None) -> str | None:

@@ -100,7 +100,7 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
 .sl-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .sl-name { overflow-wrap: anywhere; }
 .sl-meta { font-size: 0.82rem; color: var(--muted); }
-.sl-code { direction: ltr; unicode-bidi: isolate; }
+.sl-code { direction: ltr; font-variant-numeric: tabular-nums; }
 .sl-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .sl-tags .tag { margin-inline-start: 0; }
 .shoplist li.done .sl-name, .shoplist li.done .lprice { text-decoration: line-through; color: var(--muted); }
