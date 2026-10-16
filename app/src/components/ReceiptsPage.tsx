@@ -5,7 +5,17 @@ import { parseReceiptCsv, type ReceiptRow } from "../lib/basket";
 type Branch = { id: number; name: string | null; city: string | null; chains: { name: string } | null };
 type Receipt = { id: number; purchased_at: string | null; total: number | null; branch_id: number | null; receipt_items: { count: number }[] };
 
-const SAMPLE = "תאריך,מוצר,ברקוד,כמות,מחיר\n2026-10-15,קוטג תנובה 5% 250 גרם,,2,11.80\n2026-10-15,חלב תנובה 3% 1 ליטר,7290004131074,1,7.11";
+const SAMPLE = "תאריך,מוצר,ברקוד,כמות,מחיר\n15/10/2026,קוטג תנובה 5% 250 גרם,,2,11.80\n15/10/2026,חלב תנובה 3% 1 ליטר,7290004131074,1,7.11";
+
+function downloadTemplate() {
+  // BOM so Excel opens the Hebrew correctly
+  const blob = new Blob(["\uFEFF" + SAMPLE + "\n"], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "receipt-template.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 export default function ReceiptsPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -87,9 +97,26 @@ export default function ReceiptsPage() {
       <section className="card">
         <h3>טעינת קבלה</h3>
         <p className="muted small">
-          קובץ CSV או טבלה מודבקת (גם מגיליון), עם עמודות: תאריך, מוצר, ברקוד, כמות, מחיר. חובה רק "מוצר". בלי ברקוד, השם
-          מזוהה מול שמות הפריטים של הרשת, כי הקבלה מדפיסה בדיוק את השם שהרשת מפרסמת.
+          שורה אחת לכל פריט בקבלה. אפשר למלא את התבנית באקסל או בגוגל שיטס, לשמור כ-CSV ולטעון, או להעתיק את הטבלה
+          ולהדביק בתיבה למטה.
         </p>
+        <button onClick={downloadTemplate}>⬇️ הורדת תבנית CSV</button>
+        <details>
+          <summary>מה למלא בכל עמודה</summary>
+          <table className="tbl">
+            <thead>
+              <tr><th>עמודה</th><th>חובה?</th><th>מה כותבים</th><th>דוגמה</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>תאריך</td><td>לא</td><td>תאריך הקנייה</td><td>15/10/2026</td></tr>
+              <tr><td>מוצר</td><td><b>כן</b></td><td>שם הפריט כמו שמודפס בקבלה</td><td>קוטג תנובה 5% 250 גרם</td></tr>
+              <tr><td>ברקוד</td><td>לא</td><td>אם מופיע בקבלה. בלעדיו מזהים לפי השם</td><td>7290004131074</td></tr>
+              <tr><td>כמות</td><td>לא (1)</td><td>מספר יחידות, או ק"ג במוצרים שקילים</td><td>2</td></tr>
+              <tr><td>מחיר</td><td>לא</td><td>סה"כ לשורה (לא ליחידה)</td><td>11.80</td></tr>
+            </tbody>
+          </table>
+          <p className="muted small">את הסניף בוחרים ברשימה למטה, לא בקובץ.</p>
+        </details>
         <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
           <option value="">באיזה סניף? (משפר זיהוי)</option>
           {branches.map((b) => (

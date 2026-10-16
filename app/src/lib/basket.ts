@@ -250,6 +250,18 @@ function splitCsvLine(line: string, sep: string): string[] {
   return out.map((s) => s.trim());
 }
 
+/** Accepts 2026-10-15, 15/10/2026, 15.10.26 etc. Returns YYYY-MM-DD or null. */
+export function normDate(v: string): string | null {
+  const iso = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const dmy = v.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (dmy) {
+    const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${y}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  return null;
+}
+
 export function parseReceiptCsv(text: string): ReceiptRow[] {
   const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return [];
@@ -264,6 +276,7 @@ export function parseReceiptCsv(text: string): ReceiptRow[] {
       if (!h || !v) return;
       if (h === "qty") row.qty = parseFloat(v.replace(",", ".")) || 1;
       else if (h === "price") row.price = parseFloat(v.replace(/[^\d.\-]/g, "")) || null;
+      else if (h === "date") row.date = normDate(v);
       else row[h] = v as never;
     });
     return row;

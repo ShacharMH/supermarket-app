@@ -61,3 +61,13 @@ describe("parseReceiptCsv", () => {
     expect(rows).toEqual([{ date: "2026-10-01", store: null, name: "קוטג תנובה, 5%", barcode: "7290000000001", qty: 2, price: 11.8 }]);
   });
 });
+
+describe("normDate", () => {
+  it("handles common formats", async () => {
+    const { normDate } = await import("./basket");
+    expect(normDate("15/10/2026")).toBe("2026-10-15");
+    expect(normDate("5.3.26")).toBe("2026-03-05");
+    expect(normDate("2026-10-15")).toBe("2026-10-15");
+    expect(normDate("אתמול")).toBe(null);
+  });
+});
