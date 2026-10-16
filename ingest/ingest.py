@@ -169,7 +169,28 @@ def city_center(conn, city: str) -> tuple[float, float] | None:
     return pt
 
 
+def infer_missing_cities(conn) -> None:
+    """Some chains publish city '0' or a numeric code and put the city in the store
+    name instead ("קולינריק מודיעין"). Fill the city from the longest known city
+    name found in the store name or address."""
+    with conn.cursor() as cur:
+        cur.execute(r"select distinct city from branches where city is not null and city !~ '^\d*$'")
+        known = sorted({norm_city(c) for (c,) in cur.fetchall() if len(norm_city(c)) >= 2}, key=len, reverse=True)
+        cur.execute(r"select id, name, address from branches where city is null or city ~ '^\d*$'")
+        missing = cur.fetchall()
+        fixed = 0
+        for bid, name, address in missing:
+            text = f" {norm_city(name)} {norm_city(address)} "
+            hit = next((c for c in known if f" {c} " in text), None)
+            if hit:
+                cur.execute("update branches set city = %s where id = %s", (hit, bid))
+                fixed += 1
+    conn.commit()
+    log(f"inferred city for {fixed}/{len(missing)} branches without one")
+
+
 def select_tracked(conn) -> list[tuple]:
+    infer_missing_cities(conn)
     with conn.cursor() as cur:
         cur.execute("select id, label, city, lat, lon, radius_km from user_areas")
         areas = cur.fetchall()
