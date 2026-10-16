@@ -1,6 +1,10 @@
 name: Ingest prices
 
 on:
+  # Pushing a change to this file starts a run (lets automation trigger it without API access).
+  push:
+    branches: [main]
+    paths: [".github/ingest-trigger"]
   schedule:
     - cron: "17 3 * * *"   # every night, ~06:17 Israel time
   workflow_dispatch:
@@ -13,9 +17,10 @@ on:
         required: false
         default: ""
 
+# A new run replaces one still in progress (it would load the same data).
 concurrency:
   group: ingest
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   ingest:
