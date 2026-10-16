@@ -310,6 +310,8 @@ def load_prices(conn, branch_id: int, items: list[dict]) -> None:
                select barcode, name, manufacturer, quantity, unit_of_measure, is_weighted from _p
                on conflict (barcode) do update set
                  manufacturer = coalesce(products.manufacturer, excluded.manufacturer),
+                 name = case when products.manufacturer is null and excluded.manufacturer is not null
+                             then excluded.name else products.name end,
                  quantity = coalesce(products.quantity, excluded.quantity),
                  unit_of_measure = coalesce(products.unit_of_measure, excluded.unit_of_measure)"""
         )
@@ -348,7 +350,7 @@ def load_promos(conn, branch_id: int, chain_id: str, promos: list[dict]) -> None
             row = cur.fetchone()
             if not row:
                 continue
-            codes = [b if len(b) >= 7 else f"{chain_id}:{b}" for b in p["barcodes"]]
+            codes = p["barcodes"]
             with cur.copy("copy promotion_items (promotion_pk, barcode) from stdin") as cp:
                 for b in set(codes):
                     cp.write_row((row[0], b))

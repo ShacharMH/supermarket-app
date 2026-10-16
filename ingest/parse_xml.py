@@ -118,23 +118,47 @@ def parse_stores(path: str) -> list[dict]:
 
 # ---------------------------------------------------------------- prices
 
+def is_gtin(code: str) -> bool:
+    """True for a real EAN-8 / UPC-A / EAN-13 barcode (valid check digit)."""
+    if not code.isdigit() or len(code) not in (8, 12, 13):
+        return False
+    digits = [int(c) for c in code]
+    check = digits.pop()
+    total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(digits)))
+    return (10 - total % 10) % 10 == check
+
+
+def norm_barcode(code: str, chain_id: str | None) -> str:
+    """Real barcodes are comparable across chains; anything else is a chain-internal
+    code (produce, bakery...) and gets namespaced by chain."""
+    code = code.strip().lstrip("0")
+    if is_gtin(code) or (len(code) >= 11 and is_gtin(code.zfill(13))):
+        return code
+    return f"{chain_id or 'x'}:{code}"
+
+
+UNKNOWN = {"לא ידוע", "לא ידוע.", "unknown", "כללי", "-", "0"}
+
+
+def _known(v: str | None) -> str | None:
+    return None if v is None or v.strip().lower() in UNKNOWN else v.strip()
+
+
 def parse_prices(path: str) -> tuple[dict, list[dict]]:
     meta = _root_fields(path)
     items = []
     for _, f in _records(path, "itemcode"):
-        barcode = (f.get("itemcode") or "").lstrip("0")
+        raw = (f.get("itemcode") or "").strip()
         price = _num(f.get("itemprice"))
-        if not barcode or price is None or price <= 0:
+        if not raw.strip("0") or price is None or price <= 0:
             continue
-        # ItemType 0 = chain-internal code (produce, bakery, ...). Those are only
-        # comparable within the chain, so namespace them by chain.
-        if f.get("itemtype") == "0" or len(barcode) < 7:
-            barcode = f"{meta.get('chainid', 'x')}:{barcode}"
+        # ItemType is unreliable across chains, so decide by the code itself.
+        barcode = norm_barcode(raw, meta.get("chainid"))
         items.append(
             {
                 "barcode": barcode,
                 "name": _first(f, "itemname", "itemnm", "manufactureritemdescription") or barcode,
-                "manufacturer": _first(f, "manufacturername", "manufacturename"),
+                "manufacturer": _known(_first(f, "manufacturername", "manufacturename")),
                 "quantity": _num(f.get("quantity")),
                 "unit_of_measure": _first(f, "unitqty", "unitofmeasure"),
                 "is_weighted": f.get("bisweighted", "0") in ("1", "true"),
@@ -155,8 +179,8 @@ def parse_promos(path: str) -> tuple[dict, list[dict]]:
         clubs = []
         for sub in el.iter():
             key = _local(sub.tag)
-            if key == "itemcode" and sub.text:
-                barcodes.append(sub.text.strip().lstrip("0"))
+            if key == "itemcode" and sub.text and sub.text.strip().strip("0"):
+                barcodes.append(norm_barcode(sub.text, meta.get("chainid")))
             elif key == "clubid" and sub.text:
                 clubs.append(sub.text.strip())
         if not barcodes:
