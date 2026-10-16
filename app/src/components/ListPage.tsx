@@ -92,9 +92,16 @@ export default function ListPage() {
       const results = new Map<string, Product[]>();
       await Promise.all(
         items.map(async (it) => {
-          const { data, error } = await supabase.rpc("search_products", { term: it.key, max_results: 25 });
-          if (error) throw error;
-          results.set(it.key, (data ?? []) as Product[]);
+          // "בשר טחון מהקצביה" -> "בשר טחון" -> "בשר": drop trailing words until something matches
+          const words = it.key.split(/\s+/);
+          for (let n = words.length; n >= 1; n--) {
+            const { data, error } = await supabase.rpc("search_products", { term: words.slice(0, n).join(" "), max_results: 25 });
+            if (error) throw error;
+            if (data?.length || n === 1) {
+              results.set(it.key, (data ?? []) as Product[]);
+              break;
+            }
+          }
         }),
       );
       const resolved = items.map((it) => resolveItem(it, results.get(it.key) ?? [], pinned.get(it.key) ?? [], bought));
@@ -114,7 +121,9 @@ export default function ListPage() {
       const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
       setResult({ items: resolved, results, stores, splits });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // Supabase errors are plain objects with a message, not Error instances
+      const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
+      setError(`משהו השתבש: ${msg}`);
     } finally {
       setBusy(false);
     }
