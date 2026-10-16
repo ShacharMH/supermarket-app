@@ -135,6 +135,29 @@ test("best store shows a shopping list to tick off and share", async ({ page }) 
   expect(await page.evaluate(() => (window as unknown as { copied: string }).copied)).toContain("🛒 רמי לוי · רמלה");
 });
 
+test("by-weight items always show their weight, even with no packaged option", async ({ page }) => {
+  const meat = { ...PRODUCT, barcode: "c:1", name: "בשר בקר טחון טרי", is_weighted: true, quantity: 1, unit_of_measure: "קילוגרם" };
+  const weighedTerms: string[] = [];
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_weighed")) {
+      weighedTerms.push(JSON.parse(body).term);
+      return r.fulfill({ json: body.includes("בשר") ? [meat] : [] });
+    }
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: body.includes("בשר") ? [] : [PRODUCT] });
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "בשר טחון מהקצביה\nחלב 3%" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  const meatItem = page.locator(".item", { hasText: "בשר טחון" });
+  await expect(meatItem).toContainText("נקנה במשקל");
+  await expect(meatItem.locator(".grams input")).toHaveValue("500");
+  const milkItem = page.locator(".item", { hasText: "חלב 3%" });
+  await expect(milkItem).toContainText("ארוז");
+  await expect(milkItem.locator(".seg")).toHaveCount(0);
+  expect(weighedTerms).not.toContain("חלב"); // never relaxed to a single word
+});
+
 test("empty data explains what to do", async ({ page }) => {
   await mockSupabase(page, (r, url) => {
     if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "חלב" } }] });

@@ -83,10 +83,10 @@ export default function ListPage() {
       }
       const bought = new Map<string, number>((history.data ?? []).map((h) => [h.barcode, h.times_bought]));
 
-      const search = async (fn: string, term: string, max: number) => {
+      const search = async (fn: string, term: string, max: number, relax = true) => {
         // "בשר טחון בקר" -> "בשר טחון" -> "בשר": drop trailing words until something matches
         const words = term.split(/\s+/);
-        for (let n = words.length; n >= 1; n--) {
+        for (let n = words.length; n >= (relax ? 1 : words.length); n--) {
           const { data, error } = await supabase.rpc(fn, { term: words.slice(0, n).join(" "), max_results: max });
           if (error) throw error;
           if (data?.length || n === 1) return (data ?? []) as Product[];
@@ -99,7 +99,8 @@ export default function ListPage() {
           // Weighed goods (butcher, deli, produce) use per-chain codes and are searched separately.
           const [packaged, weighed] = await Promise.all([
             it.byWeight ? Promise.resolve([]) : search("search_products", it.key, 40),
-            search("search_weighed", it.key, 40),
+            // no relaxing here: "חלב 3%" -> "חלב" would find halva and toffees
+            search("search_weighed", it.key, 40, !!it.byWeight),
           ]);
           const seen = new Set(packaged.map((p) => p.barcode));
           results.set(it.key, [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))]);
@@ -258,36 +259,42 @@ export default function ListPage() {
                 <div className="ikey">{it.key}</div>
                 {(() => {
                   const rs = result.results.get(it.key) ?? [];
-                  return rs.some((r) => r.is_weighted) && rs.some((r) => !r.is_weighted);
-                })() && (
-                  <div className="row mode">
-                    <div className="seg" role="group" aria-label="אופן קנייה">
-                      <button className={it.weighted ? "on" : ""} onClick={() => !it.weighted && setTerm(it.key, { mode: "weight" })}>
-                        ⚖️ במשקל
-                      </button>
-                      <button className={!it.weighted ? "on" : ""} onClick={() => it.weighted && setTerm(it.key, { mode: "pack" })}>
-                        📦 ארוז
-                      </button>
+                  if (!rs.length) return null;
+                  const both = rs.some((r) => r.is_weighted) && rs.some((r) => !r.is_weighted);
+                  return (
+                    <div className="row mode">
+                      {both ? (
+                        <div className="seg" role="group" aria-label="אופן קנייה">
+                          <button className={it.weighted ? "on" : ""} onClick={() => !it.weighted && setTerm(it.key, { mode: "weight" })}>
+                            ⚖️ במשקל
+                          </button>
+                          <button className={!it.weighted ? "on" : ""} onClick={() => it.weighted && setTerm(it.key, { mode: "pack" })}>
+                            📦 ארוז
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="tag alt">{it.weighted ? "⚖️ נקנה במשקל" : "📦 ארוז"}</span>
+                      )}
+                      {it.weighted && (
+                        <label className="grams">
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={50}
+                            step={50}
+                            defaultValue={Math.round(it.qty * 1000)}
+                            key={`${it.key}-${it.qty}`}
+                            onBlur={(e) => {
+                              const g = Number(e.target.value);
+                              if (g > 0 && Math.abs(g / 1000 - it.qty) > 0.001) setTerm(it.key, { mode: "weight", weight_kg: g / 1000 });
+                            }}
+                          />
+                          גרם
+                        </label>
+                      )}
                     </div>
-                    {it.weighted && (
-                      <label className="grams">
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={50}
-                          step={50}
-                          defaultValue={Math.round(it.qty * 1000)}
-                          key={`${it.key}-${it.qty}`}
-                          onBlur={(e) => {
-                            const g = Number(e.target.value);
-                            if (g > 0 && Math.abs(g / 1000 - it.qty) > 0.001) setTerm(it.key, { mode: "weight", weight_kg: g / 1000 });
-                          }}
-                        />
-                        גרם
-                      </label>
-                    )}
-                  </div>
-                )}
+                  );
+                })()}
                 {(result.results.get(it.key) ?? []).length === 0 ? (
                   <div className="warn">לא נמצא מוצר תואם</div>
                 ) : (
