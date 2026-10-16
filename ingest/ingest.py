@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -34,6 +35,8 @@ CITY_MARGIN_KM = 4
 MAX_PER_CHAIN_PER_AREA = int(os.environ.get("MAX_PER_CHAIN_PER_AREA", "2"))
 MAX_PER_AREA = int(os.environ.get("MAX_PER_AREA", "30"))
 MAX_DB_MB = int(os.environ.get("MAX_DB_MB", "400"))
+# Give up on one download attempt after this long (a stuck site must not eat the run).
+ATTEMPT_TIMEOUT_S = int(os.environ.get("ATTEMPT_TIMEOUT_S", "600"))
 # Chains are downloaded in parallel; loading into the DB stays sequential.
 DOWNLOAD_WORKERS = int(os.environ.get("DOWNLOAD_WORKERS", "6"))
 # Store lists rarely change: on scheduled runs refresh them only weekly.
@@ -45,8 +48,20 @@ MAX_PROMO_ITEMS = 3000
 STAMP_RE = re.compile(r"(\d{8})-?(\d{4,6})")
 
 
+_log_lock = threading.Lock()
+_log_conn = None  # separate autocommit connection: progress is visible while the run is going
+_run_id = None
+
+
 def log(msg: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
+    if _log_conn is None:
+        return
+    try:
+        with _log_lock:
+            _log_conn.execute("insert into ingest_log (run_id, msg) values (%s, %s)", (_run_id, msg[:1000]))
+    except Exception:  # noqa: BLE001 - logging must never break the run
+        pass
 
 
 # ------------------------------------------------------------------ download
@@ -58,33 +73,41 @@ def _newest(paths: list[str]) -> list[str]:
     return sorted(paths, key=stamp, reverse=True)
 
 
-async def _scrape(enum: ScraperFactory, dest: str, files_types, regex=None, when_date=None, limit=None) -> list[str]:
+async def _scrape(enum: ScraperFactory, dest: str, files_types, regex=None, when_date=None, limit=None,
+                  store_id=None) -> list[str]:
     cls = enum.value
     scraper = cls(file_output=DiskFileOutput(dest))
     found = []
-    async for result in scraper.scrape(
-        files_types=files_types, file_name_regex=regex, when_date=when_date, limit=limit
-    ):
-        if result.extract_succefully and result.file_name:
-            p = os.path.join(dest, result.file_name)
-            if os.path.exists(p):
-                found.append(p)
+
+    async def collect():
+        async for result in scraper.scrape(
+            files_types=files_types, file_name_regex=regex, when_date=when_date, limit=limit, store_id=store_id
+        ):
+            if result.extract_succefully and result.file_name:
+                p = os.path.join(dest, result.file_name)
+                if os.path.exists(p):
+                    found.append(p)
+
+    try:
+        await asyncio.wait_for(collect(), ATTEMPT_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        log(f"  {enum.name}{f' store {store_id}' if store_id else ''}: gave up after {ATTEMPT_TIMEOUT_S}s")
     # fall back to whatever landed in the folder (some engines rename on extract)
     if not found:
         found = [os.path.join(dest, f) for f in os.listdir(dest) if f.lower().endswith(".xml")]
     return found
 
 
-def fetch(enum: ScraperFactory, files_types: list[str], regex: str | None = None) -> list[str]:
+def fetch(enum: ScraperFactory, files_types: list[str], regex: str | None = None, store_id: int | None = None) -> list[str]:
     """Download files of the given types, preferring today's, then yesterday's."""
     today = datetime.now(ZoneInfo("Asia/Jerusalem"))
-    attempts = [dict(when_date=today), dict(when_date=today - timedelta(days=1)), dict(limit=40)]
+    attempts = [dict(when_date=today), dict(when_date=today - timedelta(days=1)), dict(limit=6 if store_id else 40)]
     for kw in attempts:
         dest = tempfile.mkdtemp(prefix=f"{enum.name}-")
         try:
-            paths = asyncio.run(_scrape(enum, dest, files_types, regex=regex, **kw))
+            paths = asyncio.run(_scrape(enum, dest, files_types, regex=regex, store_id=store_id, **kw))
         except Exception as e:  # noqa: BLE001
-            log(f"  {enum.name}: download error {e}")
+            log(f"  {enum.name}: download error {e!r}")
             paths = []
         if paths:
             return _newest(paths)
@@ -376,11 +399,17 @@ def ingest_prices(conn, tracked_rows) -> None:
         by_scraper.setdefault(scraper, []).append((bid, store_id, chain_id))
 
     def download(scraper: str, branches: list[tuple]) -> list[str]:
-        ids = "|".join(f"0*{int(s)}" for _b, s, _c in branches)
-        regex = rf"-({ids})-\d{{8}}"
-        log(f"downloading prices: {scraper} ({len(branches)} branches)")
+        # one store at a time: some sites (e.g. Shufersal) filter by store server-side,
+        # which is far faster than listing every file of the chain
         enum = getattr(ScraperFactory, scraper)
-        return fetch(enum, [FileTypesFilters.PRICE_FULL_FILE.name, FileTypesFilters.PROMO_FULL_FILE.name], regex)
+        paths: list[str] = []
+        for _bid, store_id, _cid in branches:
+            t = datetime.now()
+            got = fetch(enum, [FileTypesFilters.PRICE_FULL_FILE.name, FileTypesFilters.PROMO_FULL_FILE.name],
+                        rf"-0*{int(store_id)}-\d{{8}}", store_id=int(store_id))
+            log(f"downloaded {scraper} store {store_id}: {len(got)} files in {(datetime.now() - t).seconds}s")
+            paths += got
+        return paths
 
     with ThreadPoolExecutor(DOWNLOAD_WORKERS) as pool:
         futures = {pool.submit(download, sc, br): sc for sc, br in by_scraper.items()}
@@ -426,11 +455,18 @@ def stores_are_fresh(conn) -> bool:
 def main() -> None:
     db_url = os.environ["SUPABASE_DB_URL"]
     chains = active_chains()
+    global _log_conn, _run_id
     with psycopg.connect(db_url, autocommit=False, prepare_threshold=None) as conn:
         with conn.cursor() as cur:
             cur.execute("insert into ingest_runs default values returning id")
             run_id = cur.fetchone()[0]
+            cur.execute("delete from ingest_log where at < now() - interval '14 days'")
         conn.commit()
+        try:
+            _log_conn = psycopg.connect(db_url, autocommit=True, prepare_threshold=None)
+            _run_id = run_id
+        except Exception as e:  # noqa: BLE001
+            print(f"progress logging disabled: {e!r}")
         status, note = "ok", None
         try:
             # SKIP_STORES: "1" = skip, "0" = force refresh, unset (scheduled) = weekly
