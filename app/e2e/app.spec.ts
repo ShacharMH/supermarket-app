@@ -205,6 +205,30 @@ test("a requested size is filled with the right number of packs", async ({ page 
   expect(item.qtys).toEqual({ "4l": 1, "1l": 5 });
 });
 
+test("in-store mode: big list, tick items, progress, finish", async ({ page }) => {
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/price_basket"))
+      return r.fulfill({ json: [{ ...ROWS[0], lines: ROWS[0].lines.map((l, i) => (i === 1 ? { ...l, price: 6.9, hint: "2 ב-11", hint_qty: 2, hint_unit: 5.5 } : l)) }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best .sl-hint")).toContainText("עוד יחידה אחת");
+  await page.locator(".best").getByRole("button", { name: /מצב קנייה/ }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg).toContainText("0/3 בעגלה");
+  await expect(dlg.locator(".sm-hint")).toContainText("₪5.50 ליחידה");
+  await dlg.locator(".sm-row").first().click();
+  await expect(dlg).toContainText("1/3 בעגלה");
+  await expect(dlg.locator(".sm-sep")).toHaveText("בעגלה");
+  await dlg.locator("li:not(.done) .sm-row").first().click();
+  await dlg.locator("li:not(.done) .sm-row").first().click();
+  await expect(dlg).toContainText("הכול בעגלה");
+  await dlg.getByRole("button", { name: /סיום/ }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(page.locator(".best .shoplist input:checked")).toHaveCount(0);
+});
+
 test("empty data explains what to do", async ({ page }) => {
   await mockSupabase(page, (r, url) => {
     if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "חלב" } }] });

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { howMuch, maker, packSize, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
+import { howMuch, maker, packSize, promoHint, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
+import ShopMode from "./ShopMode";
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
 
@@ -23,6 +24,7 @@ export default function ShoppingList({
 }) {
   const [checked, setChecked] = useState<Set<string>>(() => loadChecked(id));
   const [copied, setCopied] = useState(false);
+  const [shopping, setShopping] = useState(false);
 
   useEffect(() => {
     try {
@@ -85,6 +87,10 @@ export default function ShoppingList({
                     {l.promo && <span className="tag promo">מבצע: {l.promo}</span>}
                     {!l.preferred && <span className="tag alt">חלופה זולה</span>}
                   </span>
+                  {(() => {
+                    const h = promoHint(l);
+                    return h ? <span className="sl-hint">💡 {h.text} (חיסכון {money(h.saving)})</span> : null;
+                  })()}
                 </span>
                 <span className="lprice">{money(l.total)}</span>
               </label>
@@ -92,6 +98,19 @@ export default function ShoppingList({
           );
         })}
       </ul>
+      <button className="primary shop-go" onClick={() => setShopping(true)}>🛒 מצב קנייה בסופר</button>
+      {shopping && (
+        <ShopMode
+          title={title}
+          lines={lines}
+          weighted={weighted}
+          products={products}
+          checked={checked}
+          toggle={toggle}
+          clear={() => setChecked(new Set())}
+          close={() => setShopping(false)}
+        />
+      )}
       <div className="row">
         <button onClick={share}>{copied ? "✓ הועתק" : "📤 שיתוף / העתקת הרשימה"}</button>
         {checked.size > 0 && (

@@ -44,6 +44,10 @@ export type Line = {
   promo: string | null;
   promo_min_qty: number | null;
   preferred: boolean;
+  // a promotion this line doesn't reach yet ("2 ב-10" when buying 1)
+  hint?: string;
+  hint_qty?: number;
+  hint_unit?: number;
 };
 
 export type BranchRow = {
@@ -220,6 +224,27 @@ function closestPack(pool: Product[], [unit, amount]: [string, number]): Product
   return best;
 }
 
+const NAME_NOISE = /^(\d+%?|\(?\d+\)?|ק"ג|קג|גרם|גר|שקיל|במשקל|מס|של|עם|ב|ו|ל|-)$/;
+
+/**
+ * Words that describe what kind of product this is beyond the list term
+ * ("בשר בקר טחון טרי" for "בשר טחון" -> בקר, טרי). Returns a matcher for products
+ * of the same kind, or null when the name adds nothing.
+ */
+export function sameKind(p: Product | null, term: string): ((r: Product) => boolean) | null {
+  if (!p) return null;
+  const norm = (x: string) => x.replace(/["'`׳״()]/g, "").toLowerCase();
+  const termWords = new Set(norm(term).split(/\s+/));
+  const words = norm(p.name)
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !termWords.has(w) && !NAME_NOISE.test(w));
+  if (!words.length) return null;
+  return (r) => {
+    const name = ` ${norm(r.name)} `;
+    return r.barcode === p.barcode || words.every((w) => name.includes(` ${w}`));
+  };
+}
+
 export type BuyMode = "weight" | "pack";
 
 // What people usually buy by weight, with a sensible default amount (kg).
@@ -298,6 +323,12 @@ export function resolveItem(
   if (!reference && wanted) reference = closestPack(pool, wanted); // "אקונומיקה 5 ליטר"
   reference ??= pool[0];
   const weighted = mode === "weight";
+  // Weighed goods: every chain has its own code for "בשר בקר טחון טרי", so a picked or
+  // bought product stands for all products with the same describing words.
+  if (weighted && preferred.length) {
+    const like = sameKind(results.find((r) => r.barcode === preferred[0]) ?? null, item.key);
+    if (like) preferred = weighed.filter(like).map((r) => r.barcode);
+  }
   let candidates: Product[];
   const qtys: Record<string, number> = {};
   const factors: Record<string, number> = {};
@@ -493,6 +524,18 @@ const UNKNOWN_MAKER = /^(לא ידוע|כללי|tbd|unknown|,|-|0)?$/i;
 export function maker(p: Product | undefined): string | null {
   const m = p?.manufacturer?.trim();
   return m && !UNKNOWN_MAKER.test(m) ? m : null;
+}
+
+/** "Buy 2 and pay ₪5.00 each instead of ₪6.50 (save ₪3.00)" - or null when not worth saying. */
+export function promoHint(l: Line): { text: string; saving: number } | null {
+  if (!l.hint || !l.hint_qty || l.hint_unit == null || l.hint_qty <= l.qty) return null;
+  const saving = Math.round((l.price - l.hint_unit) * l.hint_qty * 100) / 100;
+  if (saving < 0.5) return null;
+  const extra = l.hint_qty - l.qty;
+  return {
+    text: `מבצע "${l.hint}": עוד ${extra === 1 ? "יחידה אחת" : `${extra} יחידות`} ותשלמו ₪${l.hint_unit.toFixed(2)} ליחידה במקום ₪${l.price.toFixed(2)}`,
+    saving,
+  };
 }
 
 /** A real barcode worth showing (chain-internal codes are "chain:code"). */

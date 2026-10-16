@@ -252,3 +252,33 @@ describe("quantities and sizes", () => {
     expect(r.factors).toEqual({ "300": 0.833 });
   });
 });
+
+describe("promo hints", () => {
+  it("suggests reaching a multi-buy deal", async () => {
+    const { promoHint } = await import("./basket");
+    const l = { ...line("קוטג", 6.5), price: 6.5, hint: "2 ב-10", hint_qty: 2, hint_unit: 5 };
+    expect(promoHint(l)).toEqual({ text: 'מבצע "2 ב-10": עוד יחידה אחת ותשלמו ₪5.00 ליחידה במקום ₪6.50', saving: 3 });
+    expect(promoHint({ ...l, hint_unit: 6.4 })).toBeNull(); // not worth mentioning
+    expect(promoHint({ ...l, qty: 2 })).toBeNull();
+  });
+});
+
+describe("picking a weighed product applies to every chain", () => {
+  const w = (barcode: string, name: string): Product => ({ ...prod(barcode, 1, "קילוגרם"), is_weighted: true, name });
+  const meats = [
+    w("frozen", "בשר טחון מקפוא עטרה"),
+    w("ramilevy", "בשר בקר טחון טרי"),
+    w("other:9", "בשר בקר טחון טרי"),
+    w("mahfud", "בשר טחון טרי מחפוד (עוף ירושלים)"),
+    w("bakar2", "טחון בקר מבשר טרי"),
+  ];
+  it("prefers the same kind in all chains, not just the picked code", () => {
+    const r = resolveItem({ key: "בשר טחון", qty: 1 }, meats, ["ramilevy"], new Map());
+    expect(r.preferred).toEqual(["ramilevy", "other:9", "bakar2"]);
+    expect(r.candidates.map((c) => c.barcode)).toContain("frozen"); // still allowed, with the penalty
+  });
+  it("'only this product' means only that kind", () => {
+    const r = resolveItem({ key: "בשר טחון", qty: 1 }, meats, ["ramilevy"], new Map(), { strict: true });
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["ramilevy", "other:9", "bakar2"]);
+  });
+});

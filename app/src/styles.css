@@ -148,3 +148,29 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
 .store-price { white-space: nowrap; font-weight: 700; }
 .diff { color: var(--muted); }
 .partial > summary { padding: 8px 0; cursor: pointer; }
+.sl-hint { font-size: 0.82rem; color: var(--promo); background: var(--promo-bg); border-radius: 8px; padding: 4px 8px; align-self: flex-start; }
+.shop-go { margin-top: 4px; }
+
+/* --- in-store mode --- */
+.shopmode { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; overflow-y: auto; padding-bottom: env(safe-area-inset-bottom); }
+.sm-head { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; padding-top: calc(14px + env(safe-area-inset-top)); background: var(--card); border-bottom: 1px solid var(--line); }
+.sm-title { font-weight: 800; font-size: 1.15rem; }
+.sm-progress { color: var(--muted); font-size: 0.95rem; }
+.sm-close { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 1.2rem; flex: 0 0 auto; }
+.sm-bar { height: 6px; background: var(--chip); }
+.sm-bar > div { height: 100%; background: var(--accent); transition: width 0.25s; }
+.sm-list { list-style: none; margin: 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; max-width: 640px; width: 100%; align-self: center; }
+.sm-sep { color: var(--muted); font-size: 0.9rem; padding: 8px 4px 0; }
+.sm-row { width: 100%; display: flex; align-items: flex-start; gap: 12px; text-align: start; padding: 14px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); font-size: 1.15rem; }
+.sm-box { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 10px; border: 2px solid var(--muted); display: grid; place-items: center; font-weight: 800; color: var(--accent-ink); }
+li.done .sm-box { background: var(--accent); border-color: var(--accent); }
+li.done .sm-row { opacity: 0.55; }
+li.done .sm-name { text-decoration: line-through; }
+.sm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sm-qty { font-weight: 800; font-size: 1.25rem; color: var(--accent); }
+.sm-name { font-weight: 700; overflow-wrap: anywhere; }
+.sm-meta { font-size: 0.85rem; color: var(--muted); }
+.sm-hint { font-size: 0.9rem; color: var(--promo); }
+.sm-main .tag { margin-inline-start: 0; align-self: flex-start; font-size: 0.85rem; }
+.sm-price { font-weight: 700; white-space: nowrap; }
+.sm-finish { display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 24px 16px; font-size: 1.3rem; font-weight: 700; }

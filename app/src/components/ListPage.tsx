@@ -171,9 +171,7 @@ export default function ListPage() {
           candidates: r.candidates.map((c) => c.barcode),
           qtys: r.qtys,
           factors: r.factors,
-          // a weighed item's code exists in one chain only, so preferring it would
-          // penalise every other chain's equivalent - compare them on price alone
-          preferred: r.weighted && !strict.has(r.key) ? [] : r.preferred,
+          preferred: r.preferred,
         }));
 
       const { data, error } = await supabase.rpc("price_basket", {
