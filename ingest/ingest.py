@@ -360,30 +360,48 @@ def load_prices(conn, branch_id: int, items: list[dict]) -> None:
 
 
 def load_promos(conn, branch_id: int, chain_id: str, promos: list[dict]) -> None:
+    """Replace the branch's promotions in a few round trips (COPY into temp tables),
+    since the job runs far from the database and per-row inserts are slow."""
     now = datetime.now().astimezone()
+    keep: dict[str, dict] = {}
+    for p in promos:
+        if p["ends_at"] and p["ends_at"] < now:
+            continue
+        if len(p["barcodes"]) > MAX_PROMO_ITEMS:
+            continue
+        keep.setdefault(p["promotion_id"], p)
     with conn.cursor() as cur:
         cur.execute("delete from promotions where branch_id = %s", (branch_id,))
-        for p in promos:
-            if p["ends_at"] and p["ends_at"] < now:
-                continue
-            if len(p["barcodes"]) > MAX_PROMO_ITEMS:
-                continue
-            cur.execute(
-                """insert into promotions (branch_id, promotion_id, description, starts_at, ends_at,
-                     min_qty, max_qty, discounted_price, discount_rate, reward_type, club_ids, is_club_only)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                   on conflict (branch_id, promotion_id) do nothing returning id""",
-                (branch_id, p["promotion_id"], p["description"], p["starts_at"], p["ends_at"],
-                 p["min_qty"], p["max_qty"], p["discounted_price"], p["discount_rate"],
-                 p["reward_type"], p["club_ids"], p["is_club_only"]),
-            )
-            row = cur.fetchone()
-            if not row:
-                continue
-            codes = p["barcodes"]
-            with cur.copy("copy promotion_items (promotion_pk, barcode) from stdin") as cp:
-                for b in set(codes):
-                    cp.write_row((row[0], b))
+        cur.execute(
+            """create temp table if not exists _pm (promotion_id text, description text, starts_at timestamptz,
+               ends_at timestamptz, min_qty numeric, max_qty numeric, discounted_price numeric,
+               discount_rate numeric, reward_type int, club_ids text[], is_club_only bool) on commit delete rows"""
+        )
+        cur.execute("create temp table if not exists _pi (promotion_id text, barcode text) on commit delete rows")
+        with cur.copy("copy _pm from stdin") as cp:
+            for p in keep.values():
+                cp.write_row((p["promotion_id"], p["description"], p["starts_at"], p["ends_at"], p["min_qty"],
+                              p["max_qty"], p["discounted_price"], p["discount_rate"], p["reward_type"],
+                              p["club_ids"], p["is_club_only"]))
+        with cur.copy("copy _pi from stdin") as cp:
+            for p in keep.values():
+                for b in set(p["barcodes"]):
+                    cp.write_row((p["promotion_id"], b))
+        cur.execute(
+            """insert into promotions (branch_id, promotion_id, description, starts_at, ends_at, min_qty,
+                 max_qty, discounted_price, discount_rate, reward_type, club_ids, is_club_only)
+               select %s, promotion_id, description, starts_at, ends_at, min_qty, max_qty, discounted_price,
+                      discount_rate, reward_type, club_ids, is_club_only from _pm
+               on conflict (branch_id, promotion_id) do nothing""",
+            (branch_id,),
+        )
+        cur.execute(
+            """insert into promotion_items (promotion_pk, barcode)
+               select distinct pm.id, i.barcode from _pi i
+               join promotions pm on pm.branch_id = %s and pm.promotion_id = i.promotion_id
+               on conflict do nothing""",
+            (branch_id,),
+        )
     conn.commit()
 
 
