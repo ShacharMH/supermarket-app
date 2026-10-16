@@ -104,3 +104,11 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
 .sl-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .sl-tags .tag { margin-inline-start: 0; }
 .shoplist li.done .sl-name, .shoplist li.done .lprice { text-decoration: line-through; color: var(--muted); }
+.toast {
+  position: fixed; left: 12px; right: 12px; bottom: calc(64px + env(safe-area-inset-bottom));
+  max-width: 616px; margin: 0 auto; z-index: 10;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 12px; background: var(--text); color: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); font-size: 0.92rem;
+}
+.toast .link { color: var(--bg); text-decoration: underline; white-space: nowrap; }

@@ -5,6 +5,10 @@ import { VitePWA } from "vite-plugin-pwa";
 // Served from https://<user>.github.io/supermarket-app/
 export default defineConfig({
   base: "/supermarket-app/",
+  define: {
+    __APP_VERSION__: JSON.stringify((process.env.GITHUB_SHA ?? "dev").slice(0, 7)),
+    __BUILT_AT__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     VitePWA({

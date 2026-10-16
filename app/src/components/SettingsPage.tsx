@@ -65,6 +65,17 @@ export default function SettingsPage() {
     load();
   }
 
+  async function checkForUpdate() {
+    setMsg("בודק עדכונים...");
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      await reg?.update();
+    } catch {
+      /* offline - just reload what we have */
+    }
+    location.reload();
+  }
+
   function update(patch: Partial<Settings>) {
     const s = { ...settings, ...patch };
     setSettings(s);
@@ -129,6 +140,14 @@ export default function SettingsPage() {
           להציע פיצול לשני סופרים רק אם חוסך לפחות (₪)
           <input type="number" min={0} value={settings.minSplitSaving} onChange={(e) => update({ minSplitSaving: Number(e.target.value) })} />
         </label>
+      </section>
+
+      <section className="card">
+        <h3>על האפליקציה</h3>
+        <p className="muted small">
+          גרסה {__APP_VERSION__} · עודכנה {new Date(__BUILT_AT__).toLocaleString("he-IL")}
+        </p>
+        <button onClick={checkForUpdate}>🔄 בדיקת עדכונים</button>
       </section>
     </div>
   );

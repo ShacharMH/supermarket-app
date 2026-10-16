@@ -63,7 +63,7 @@ test("choosing a product recalculates and confirms", async ({ page }) => {
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".best")).toBeVisible();
   await page.locator(".item select").first().selectOption(PRODUCT.barcode);
-  await expect(page.getByText(/הסל חושב מחדש/)).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו");
   expect(baskets).toBe(2);
   expect(posted[0]).toContain(PRODUCT.barcode);
   await page.getByText("רק המוצר הזה, בלי תחליפים").first().click();
@@ -111,7 +111,7 @@ test("guesses by-weight for butcher items and lets the user switch", async ({ pa
   await expect(page.getByRole("button", { name: /במשקל/ })).toHaveClass(/on/);
   expect(JSON.parse(payloads[0]).items[0]).toMatchObject({ qty: 0.5, candidates: ["c:1"] });
   await page.getByRole("button", { name: /ארוז/ }).click();
-  await expect(page.getByText(/הסל חושב מחדש/)).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו");
   expect(saved).toMatchObject({ term: "בשר טחון", mode: "pack" });
   expect(JSON.parse(payloads[1]).items[0]).toMatchObject({ qty: 1, candidates: [frozen.barcode] });
 });
@@ -156,6 +156,28 @@ test("by-weight items always show their weight, even with no packaged option", a
   await expect(milkItem).toContainText("ארוז");
   await expect(milkItem.locator(".seg")).toHaveCount(0);
   expect(weighedTerms).not.toContain("חלב"); // never relaxed to a single word
+});
+
+test("an explicit button recalculates the basket", async ({ page }) => {
+  let baskets = 0;
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/price_basket")) baskets++;
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best")).toBeVisible();
+  await page.getByRole("button", { name: /חשב שוב את הסל/ }).click();
+  await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו: רמי לוי ₪24.40");
+  expect(baskets).toBe(2);
+});
+
+test("settings show the app version and an update button", async ({ page }) => {
+  await mockSupabase(page);
+  await page.goto("./");
+  await page.getByRole("button", { name: /הגדרות/ }).click();
+  await expect(page.getByText(/^גרסה /)).toBeVisible();
+  await expect(page.getByRole("button", { name: /בדיקת עדכונים/ })).toBeVisible();
 });
 
 test("empty data explains what to do", async ({ page }) => {

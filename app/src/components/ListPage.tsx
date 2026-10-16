@@ -31,7 +31,9 @@ export default function ListPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [tracked, setTracked] = useState<number | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // a toast pinned above the tab bar, visible wherever the user has scrolled to
+  const [notice, setNotice] = useState<{ text: string; done: boolean } | null>(null);
+  const noticeTimer = useRef<number | undefined>(undefined);
   const saveTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function ListPage() {
     };
   });
 
-  async function compare() {
+  async function compare(): Promise<StoreOption | undefined> {
     const settings = loadSettings();
     const items = parseList(text);
     if (items.length === 0) return;
@@ -158,6 +160,7 @@ export default function ListPage() {
       const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee });
       const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
       setResult({ items: resolved, results, stores, splits, strict });
+      return stores[0];
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -165,24 +168,31 @@ export default function ListPage() {
     }
   }
 
-  async function pin(term: string, barcode: string, strict = false) {
-    setNotice("מחשב מחדש לפי הבחירה שלך...");
-    await supabase.from("product_preferences").delete().eq("term", term);
-    if (barcode) await supabase.from("product_preferences").insert({ term, barcode, strict });
-    await compare();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    setNotice(`✓ הסל חושב מחדש עם הבחירה עבור "${term}"`);
-    window.setTimeout(() => setNotice(null), 4000);
+  async function recalc(label: string, change: () => Promise<unknown>) {
+    window.clearTimeout(noticeTimer.current);
+    setNotice({ text: "מחשב מחדש את הסל...", done: false });
+    await change();
+    const top = await compare();
+    setNotice({
+      text: top ? `✓ ${label}. הכי משתלם עכשיו: ${top.branch.chain_name} ${money(top.total)}` : `✓ ${label}`,
+      done: true,
+    });
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
   }
 
-  async function setTerm(term: string, patch: { mode?: BuyMode; weight_kg?: number }) {
-    setNotice("מחשב מחדש...");
-    await supabase.from("term_settings").upsert({ term, ...patch, updated_at: new Date().toISOString() });
-    // a product picked for the other buying mode no longer applies
-    if (patch.weight_kg === undefined) await supabase.from("product_preferences").delete().eq("term", term);
-    await compare();
-    setNotice(`✓ הסל חושב מחדש עבור "${term}"`);
-    window.setTimeout(() => setNotice(null), 4000);
+  function pin(term: string, barcode: string, strict = false) {
+    return recalc(`הבחירה עבור "${term}" נשמרה`, async () => {
+      await supabase.from("product_preferences").delete().eq("term", term);
+      if (barcode) await supabase.from("product_preferences").insert({ term, barcode, strict });
+    });
+  }
+
+  function setTerm(term: string, patch: { mode?: BuyMode; weight_kg?: number }) {
+    return recalc(`"${term}" עודכן`, async () => {
+      await supabase.from("term_settings").upsert({ term, ...patch, updated_at: new Date().toISOString() });
+      // a product picked for the other buying mode no longer applies
+      if (patch.weight_kg === undefined) await supabase.from("product_preferences").delete().eq("term", term);
+    });
   }
 
   const best = result?.stores[0];
@@ -202,7 +212,16 @@ export default function ListPage() {
         {lastRun && `מחירים עודכנו: ${lastRun}`}
       </p>
       {error && <p className="error">{error}</p>}
-      {notice && <p className="note">{notice}</p>}
+      {notice && (
+        <div className={`toast ${notice.done ? "done" : ""}`} role="status">
+          <span>{notice.text}</span>
+          {notice.done && (
+            <button className="link" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+              לתוצאה ↑
+            </button>
+          )}
+        </div>
+      )}
 
       {result && (
         <>
@@ -274,7 +293,7 @@ export default function ListPage() {
             <p className="muted small">
               האפליקציה מנחשת אם קונים במשקל (ירקות, קצביה, מעדנייה) או ארוז, ובאיזו כמות. אם הניחוש לא נכון, משנים כאן
               והבחירה נשמרת לפעם הבאה. בחירה של מוצר ספציפי הופכת אותו למועדף. מוצר אחר ייבחר רק אם הוא זול ממנו ביותר
-              מהסף שבהגדרות, אלא אם מסמנים "בלי תחליפים".
+              מהסף שבהגדרות, אלא אם מסמנים "בלי תחליפים". כל שינוי כאן מחשב את הסל מחדש מיד.
             </p>
             {result.items.map((it) => (
               <div key={it.key} className="item">
@@ -344,6 +363,9 @@ export default function ListPage() {
                 )}
               </div>
             ))}
+            <button className="primary" disabled={busy} onClick={() => recalc("הסל חושב מחדש", async () => {})}>
+              {busy ? "מחשב..." : "🔄 חשב שוב את הסל"}
+            </button>
           </section>
         </>
       )}
