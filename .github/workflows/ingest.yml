@@ -35,3 +35,8 @@ jobs:
           CHAINS: ${{ inputs.chains }}
           SKIP_STORES: ${{ inputs.skip_stores }}
         run: python ingest/ingest.py
+      - name: Health check
+        if: always()
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python ingest/healthcheck.py

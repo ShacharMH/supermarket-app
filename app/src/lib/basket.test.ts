@@ -71,3 +71,33 @@ describe("normDate", () => {
     expect(normDate("אתמול")).toBe(null);
   });
 });
+
+describe("edge cases", () => {
+  it("ignores blank lines and bullets", () => {
+    expect(parseList("\n\n  - \n•  חלב\n")).toEqual([{ key: "חלב", qty: 1 }]);
+  });
+  it("item with no products resolves to no candidates", () => {
+    const r = resolveItem({ key: "x", qty: 1 }, [], ["a"], new Map());
+    expect(r.candidates).toEqual([]);
+    expect(r.reference).toBeNull();
+  });
+  it("no store data gives no ranking and no splits", () => {
+    const ranked = rankStores([], ["x"], { deliveryFee: 30 });
+    expect(ranked).toEqual([]);
+    expect(bestSplits([], ["x"], ranked[0], { minSaving: 0, deliveryFee: 30 })).toEqual([]);
+  });
+  it("a store with no lines is not ranked", () => {
+    expect(rankStores([branch(1, [])], ["x"], { deliveryFee: 0 })).toEqual([]);
+  });
+  it("splits never use online stores", () => {
+    const rows = [branch(1, [line("x", 1), line("y", 50)]), branch(2, [line("x", 50), line("y", 1)], true)];
+    const ranked = rankStores(rows, ["x", "y"], { deliveryFee: 0 });
+    expect(bestSplits(rows, ["x", "y"], ranked[0], { minSaving: 0, deliveryFee: 0 })).toEqual([]);
+  });
+  it("receipt CSV without a name column explains the problem", () => {
+    expect(() => parseReceiptCsv("a,b\n1,2")).toThrow(/מוצר/);
+  });
+  it("receipt CSV accepts tabs (pasted from a spreadsheet)", () => {
+    expect(parseReceiptCsv("מוצר\tכמות\nחלב\t2")[0]).toMatchObject({ name: "חלב", qty: 2 });
+  });
+});

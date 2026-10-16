@@ -128,7 +128,7 @@ export default function ReceiptsPage() {
         <input type="file" accept=".csv,.tsv,.txt,text/csv" onChange={(e) => onFile(e.target.files?.[0])} />
         <textarea rows={6} value={text} placeholder={SAMPLE} onChange={(e) => preview(e.target.value)} dir="auto" />
         {rows.length > 0 && (
-          <table className="tbl">
+          <table className="tbl preview">
             <thead>
               <tr><th>מוצר</th><th>כמות</th><th>מחיר</th></tr>
             </thead>
