@@ -3,7 +3,7 @@ import { supabase } from "../supabase";
 import { loadSettings } from "../settings";
 import {
   bestSplits, parseList, rankStores, resolveItem,
-  type BranchRow, type Line, type Product, type ResolvedItem, type SplitOption, type StoreOption,
+  type BranchRow, type BuyMode, type Line, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
 type Result = {
@@ -85,11 +85,15 @@ export default function ListPage() {
     setBusy(true);
     setError(null);
     try {
-      const [prefs, history, clubs] = await Promise.all([
+      const [prefs, history, clubs, termSettings] = await Promise.all([
         supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
+        supabase.from("term_settings").select("term, mode, weight_kg"),
       ]);
+      const termOpts = new Map<string, { mode?: BuyMode; weightKg?: number }>(
+        (termSettings.data ?? []).map((t) => [t.term, { mode: t.mode ?? undefined, weightKg: t.weight_kg ?? undefined }]),
+      );
       const pinned = new Map<string, string[]>();
       const strict = new Set<string>();
       for (const p of prefs.data ?? []) {
@@ -121,7 +125,10 @@ export default function ListPage() {
         }),
       );
       const resolved = items.map((it) =>
-        resolveItem(it, results.get(it.key) ?? [], pinned.get(it.key) ?? [], bought, strict.has(it.key)),
+        resolveItem(it, results.get(it.key) ?? [], pinned.get(it.key) ?? [], bought, {
+          strict: strict.has(it.key),
+          ...termOpts.get(it.key),
+        }),
       );
       const payload = resolved
         .filter((r) => r.candidates.length)
@@ -161,6 +168,16 @@ export default function ListPage() {
     await compare();
     window.scrollTo({ top: 0, behavior: "smooth" });
     setNotice(`✓ הסל חושב מחדש עם הבחירה עבור "${term}"`);
+    window.setTimeout(() => setNotice(null), 4000);
+  }
+
+  async function setTerm(term: string, patch: { mode?: BuyMode; weight_kg?: number }) {
+    setNotice("מחשב מחדש...");
+    await supabase.from("term_settings").upsert({ term, ...patch, updated_at: new Date().toISOString() });
+    // a product picked for the other buying mode no longer applies
+    if (patch.weight_kg === undefined) await supabase.from("product_preferences").delete().eq("term", term);
+    await compare();
+    setNotice(`✓ הסל חושב מחדש עבור "${term}"`);
     window.setTimeout(() => setNotice(null), 4000);
   }
 
@@ -251,16 +268,45 @@ export default function ListPage() {
           <section className="card">
             <h3>איך הבנתי את הרשימה</h3>
             <p className="muted small">
-              בחירה של מוצר ספציפי הופכת אותו למועדף והסל מחושב מחדש. מוצר אחר ייבחר רק אם הוא זול ממנו ביותר מהסף
-              שבהגדרות, אלא אם מסמנים "בלי תחליפים". מוצרים במשקל (קצביה, מעדנייה, ירקות) מושווים לפי מחיר לק"ג. כדי לקבוע
-              כמות כותבים למשל "בשר טחון מהקצביה 500 גרם".
+              האפליקציה מנחשת אם קונים במשקל (ירקות, קצביה, מעדנייה) או ארוז, ובאיזו כמות. אם הניחוש לא נכון, משנים כאן
+              והבחירה נשמרת לפעם הבאה. בחירה של מוצר ספציפי הופכת אותו למועדף. מוצר אחר ייבחר רק אם הוא זול ממנו ביותר
+              מהסף שבהגדרות, אלא אם מסמנים "בלי תחליפים".
             </p>
             {result.items.map((it) => (
               <div key={it.key} className="item">
-                <div className="ikey">
-                  {it.key}
-                  {it.weighted && <span className="tag alt">במשקל · {kg(it.qty)}</span>}
-                </div>
+                <div className="ikey">{it.key}</div>
+                {(() => {
+                  const rs = result.results.get(it.key) ?? [];
+                  return rs.some((r) => r.is_weighted) && rs.some((r) => !r.is_weighted);
+                })() && (
+                  <div className="row mode">
+                    <div className="seg" role="group" aria-label="אופן קנייה">
+                      <button className={it.weighted ? "on" : ""} onClick={() => !it.weighted && setTerm(it.key, { mode: "weight" })}>
+                        ⚖️ במשקל
+                      </button>
+                      <button className={!it.weighted ? "on" : ""} onClick={() => it.weighted && setTerm(it.key, { mode: "pack" })}>
+                        📦 ארוז
+                      </button>
+                    </div>
+                    {it.weighted && (
+                      <label className="grams">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={50}
+                          step={50}
+                          defaultValue={Math.round(it.qty * 1000)}
+                          key={`${it.key}-${it.qty}`}
+                          onBlur={(e) => {
+                            const g = Number(e.target.value);
+                            if (g > 0 && Math.abs(g / 1000 - it.qty) > 0.001) setTerm(it.key, { mode: "weight", weight_kg: g / 1000 });
+                          }}
+                        />
+                        גרם
+                      </label>
+                    )}
+                  </div>
+                )}
                 {(result.results.get(it.key) ?? []).length === 0 ? (
                   <div className="warn">לא נמצא מוצר תואם</div>
                 ) : (

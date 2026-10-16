@@ -122,9 +122,30 @@ describe("weighed goods", () => {
     expect(r.qty).toBe(0.5);
     expect(r.candidates.map((c) => c.barcode)).toEqual(["chainA:12", "chainB:77"]);
   });
-  it("without a counter word, a matching pack size wins", () => {
+  it("butcher items default to by-weight, 0.5kg", () => {
     const results = [prod("frozen", 500, "גרם", 9), w("chainA:12")];
-    expect(resolveItem({ key: "בשר טחון", qty: 1, weightKg: 0.5 }, results, [], new Map()).reference?.barcode).toBe("frozen");
+    const r = resolveItem({ key: "בשר טחון", qty: 1 }, results, [], new Map());
+    expect([r.weighted, r.qty, r.reference?.barcode]).toEqual([true, 0.5, "chainA:12"]);
+  });
+  it("deli cheese defaults to 200g", () => {
+    expect(resolveItem({ key: "גבינה צהובה", qty: 1 }, [prod("pack", 200, "גרם"), w("d:1")], [], new Map()).qty).toBe(0.2);
+  });
+  it("the user's explicit choice wins over hints", () => {
+    const r = resolveItem({ key: "בשר טחון", qty: 1 }, [prod("frozen", 500, "גרם"), w("c:1")], [], new Map(), { mode: "pack" });
+    expect([r.weighted, r.reference?.barcode]).toEqual([false, "frozen"]);
+    expect(resolveItem({ key: "בשר טחון", qty: 1 }, [w("c:1")], [], new Map(), { weightKg: 1.2 }).qty).toBe(1.2);
+  });
+  it("receipts decide when there is no explicit choice", () => {
+    const r = resolveItem({ key: "גבינה צהובה", qty: 1 }, [prod("pack", 200, "גרם"), w("d:1")], [], new Map([["pack", 3]]));
+    expect(r.weighted).toBe(false);
+  });
+  it("unknown terms follow the shelf", () => {
+    const shelf = [{ ...w("a"), name: "קשקבל" }, { ...w("b"), name: "קשקבל צאן" }, { ...prod("c", 200, "גרם"), name: "קשקבל ארוז" }];
+    expect(resolveItem({ key: "קשקבל", qty: 1 }, shelf, [], new Map()).weighted).toBe(true);
+    expect(resolveItem({ key: "קוטג", qty: 1 }, [prod("c", 250, "גרם")], [], new Map()).weighted).toBe(false);
+  });
+  it("hint without weighed products on the shelf stays packaged", () => {
+    expect(resolveItem({ key: "עגבניות שרי", qty: 1 }, [prod("box", 250, "גרם")], [], new Map()).weighted).toBe(false);
   });
   it("weighed item without a weight defaults to 1kg", () => {
     expect(resolveItem({ key: "עגבניות", qty: 1 }, [w("a")], [], new Map()).qty).toBe(1);
@@ -138,7 +159,7 @@ describe("weighed goods", () => {
   });
   it("strict pin allows no substitutes", () => {
     const results = [prod("a", 250, "גרם"), prod("b", 250, "גרם")];
-    expect(resolveItem({ key: "x", qty: 1 }, results, ["b"], new Map(), true).candidates.map((c) => c.barcode)).toEqual(["b"]);
-    expect(resolveItem({ key: "x", qty: 1 }, results, ["b"], new Map(), false).candidates).toHaveLength(2);
+    expect(resolveItem({ key: "x", qty: 1 }, results, ["b"], new Map(), { strict: true }).candidates.map((c) => c.barcode)).toEqual(["b"]);
+    expect(resolveItem({ key: "x", qty: 1 }, results, ["b"], new Map(), { strict: false }).candidates).toHaveLength(2);
   });
 });

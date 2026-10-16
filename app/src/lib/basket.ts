@@ -154,38 +154,91 @@ export function similarSize(a: Product, b: Product): boolean {
  * - pinned: barcodes the user explicitly chose for this term
  * - bought: barcodes from receipt history (barcode -> times bought)
  */
+export type BuyMode = "weight" | "pack";
+
+// What people usually buy by weight, with a sensible default amount (kg).
+const WEIGHED_HINTS: [RegExp, number][] = [
+  // produce
+  [/^(עגבני|מלפפו|פלפל|גזר|בצל|שום|תפוח|תפו"א|תפוא|בטטה|קישוא|חציל|כרוב|כרובית|ברוקולי|סלק|לפת|קולורבי|דלעת|דלורית|תירס|אבוקדו|לימו|תפוז|קלמנטינ|מנדרינ|אשכולית|בננ|אגס|ענב|אפרסק|נקטרינ|שזיף|משמש|מנגו|קיווי|רימו|אבטיח|מלון|תמר|פטריות|ג'ינג'ר|גינגר)/, 1],
+  // butcher
+  [/(בשר|טחון|אנטריקוט|סינטה|פילה|צלעות|אסאדו|שייטל|כתף|צוואר|כבד|לבבות|פרגית|כנפיים|שוקיים|חזה עוף|עוף שלם|כרעיים|קבב|המבורגר טרי)/, 0.5],
+  // fish counter
+  [/(סלמו|דג |^דג$|דגים|אמנו|דניס|לברק|מוסר|בורי|טונה טרי|פילה דג)/, 0.5],
+  // deli counter
+  [/(גבינה צהובה|גבינה בולגרית|גבינה מלוחה|פסטרמה|נקניק|סלמי|הודו פרוס|זיתים|חלבה|חמוצים במשקל)/, 0.2],
+  // nuts & bulk
+  [/(אגוז|שקדים|קשיו|פיסטוק|בוטנים|גרעינים|פיצוחים|צימוקים|פירות יבשים|תמרים)/, 0.2],
+];
+
+export function weighedHint(term: string): number | null {
+  const t = term.replace(/[׳']/g, "'").trim();
+  for (const [re, kg] of WEIGHED_HINTS) if (re.test(t)) return kg;
+  return null;
+}
+
+const normName = (s: string) => s.replace(/["'`׳״]/g, "").toLowerCase().trim();
+
+export type ResolveOptions = {
+  strict?: boolean; // pinned product only, no substitutes
+  mode?: BuyMode; // the user's explicit choice for this term
+  weightKg?: number; // the user's saved amount for this term
+};
+
+/**
+ * Decide which products may fill a list item, and whether it is bought by weight.
+ * Order of evidence for by-weight vs packaged: the user's explicit choice, words in
+ * the line ("מהקצביה"), the pinned product, what receipts show was bought, a
+ * built-in category hint, and finally what the matching products on the shelf are.
+ */
 export function resolveItem(
   item: ListItem,
   results: Product[],
   pinned: string[],
   bought: Map<string, number>,
-  strict = false,
+  opts: ResolveOptions = {},
 ): ResolvedItem {
   if (results.length === 0) return { ...item, weighted: false, candidates: [], preferred: [], reference: null };
+  const weighed = results.filter((r) => r.is_weighted);
+  const packed = results.filter((r) => !r.is_weighted);
 
   let preferred = pinned.filter((b) => results.some((r) => r.barcode === b));
   const isPinned = preferred.length > 0;
-  if (!isPinned) {
-    preferred = results
-      .filter((r) => bought.has(r.barcode))
-      .sort((a, b) => (bought.get(b.barcode) ?? 0) - (bought.get(a.barcode) ?? 0))
-      .map((r) => r.barcode);
+  const boughtHere = results
+    .filter((r) => bought.has(r.barcode))
+    .sort((a, b) => (bought.get(b.barcode) ?? 0) - (bought.get(a.barcode) ?? 0));
+  if (!isPinned) preferred = boughtHere.map((r) => r.barcode);
+
+  const hintKg = weighedHint(item.key);
+  let mode: BuyMode | undefined = opts.mode ?? (item.byWeight ? "weight" : undefined);
+  if (!mode && isPinned) mode = results.find((r) => r.barcode === preferred[0])!.is_weighted ? "weight" : "pack";
+  if (!mode && boughtHere.length) mode = boughtHere[0].is_weighted ? "weight" : "pack";
+  if (!mode && hintKg !== null && weighed.length) mode = "weight";
+  if (!mode) {
+    // what the shelf says: among products whose name starts with the term, are most weighed?
+    const key = normName(item.key);
+    const starts = results.filter((r) => normName(r.name).startsWith(key));
+    const pool = starts.length ? starts : results.slice(0, 10);
+    mode = pool.filter((r) => r.is_weighted).length / pool.length >= 0.5 ? "weight" : "pack";
   }
-  let reference = results.find((r) => r.barcode === preferred[0]) ?? null;
-  if (!reference && item.byWeight) reference = results.find((r) => r.is_weighted) ?? null;
-  if (!reference && item.weightKg) {
-    // "קוטג 250 גרם": a packaged product of about that size, or anything sold by weight
-    const target: Product = { ...results[0], is_weighted: false, quantity: item.weightKg * 1000, unit_of_measure: "גרם" };
-    reference = results.find((r) => !r.is_weighted && similarSize(r, target)) ?? results.find((r) => r.is_weighted) ?? null;
+  if (mode === "weight" && !weighed.length) mode = "pack";
+  if (mode === "pack" && !packed.length) mode = "weight";
+
+  const pool = mode === "weight" ? weighed : packed;
+  let reference = pool.find((r) => r.barcode === preferred[0]) ?? null;
+  if (!reference && mode === "pack" && item.weightKg) {
+    // "קוטג 250 גרם": the pack closest to that size
+    const target: Product = { ...pool[0], quantity: item.weightKg * 1000, unit_of_measure: "גרם" };
+    reference = pool.find((r) => similarSize(r, target)) ?? null;
   }
-  reference ??= results[0];
-  const weighted = reference.is_weighted;
+  reference ??= pool[0];
+  const weighted = mode === "weight";
   const candidates =
-    strict && isPinned
+    opts.strict && isPinned
       ? results.filter((r) => preferred.includes(r.barcode))
       : results.filter((r) => preferred.includes(r.barcode) || similarSize(r, reference));
-  // weighed goods: qty is kilograms (default 1kg); packaged goods: qty is a count
-  const qty = weighted ? (item.weightKg ?? 1) * item.qty : item.qty;
+  // weighed goods: qty is kilograms; packaged goods: qty is a count
+  const kgEach = item.weightKg ?? opts.weightKg ?? hintKg ?? 1;
+  const qty = weighted ? Math.round(kgEach * item.qty * 1000) / 1000 : item.qty;
   return { ...item, qty, weighted, candidates, preferred, reference };
 }
 

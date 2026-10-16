@@ -93,6 +93,30 @@ test("weighed items show weight and per-kg price", async ({ page }) => {
   await expect(page.locator(".best")).toContainText('לק"ג');
 });
 
+test("guesses by-weight for butcher items and lets the user switch", async ({ page }) => {
+  const meat = { ...PRODUCT, barcode: "c:1", name: "בשר בקר טחון טרי", is_weighted: true, quantity: 1, unit_of_measure: "קילוגרם" };
+  const frozen = { ...PRODUCT, barcode: "7290000000099", name: "בשר טחון קפוא 500 גרם", quantity: 500 };
+  let saved: Record<string, unknown> | null = null;
+  const payloads: string[] = [];
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: [frozen] });
+    if (url.includes("rpc/search_weighed")) return r.fulfill({ json: [meat] });
+    if (url.includes("term_settings") && r.request().method() === "POST") saved = JSON.parse(body);
+    if (url.includes("term_settings") && r.request().method() === "GET") return r.fulfill({ json: saved ? [saved] : [] });
+    if (url.includes("rpc/price_basket")) payloads.push(body);
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "בשר טחון" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.getByRole("button", { name: /במשקל/ })).toHaveClass(/on/);
+  expect(JSON.parse(payloads[0]).items[0]).toMatchObject({ qty: 0.5, candidates: ["c:1"] });
+  await page.getByRole("button", { name: /ארוז/ }).click();
+  await expect(page.getByText(/הסל חושב מחדש/)).toBeVisible();
+  expect(saved).toMatchObject({ term: "בשר טחון", mode: "pack" });
+  expect(JSON.parse(payloads[1]).items[0]).toMatchObject({ qty: 1, candidates: [frozen.barcode] });
+});
+
 test("empty data explains what to do", async ({ page }) => {
   await mockSupabase(page, (r, url) => {
     if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "חלב" } }] });

@@ -83,3 +83,9 @@ details > summary { cursor: pointer; padding: 6px 0; list-style-position: inside
 .login h1 { color: var(--accent); margin: 0; }
 input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
 .strict { display: flex; gap: 6px; align-items: center; font-size: 0.85rem; color: var(--muted); }
+.mode { align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; flex: 0 0 auto; }
+.seg button { border: none; border-radius: 0; padding: 6px 12px; background: var(--card); }
+.seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.grams { display: inline-flex; gap: 6px; align-items: center; flex: 0 0 auto; color: var(--muted); }
+.grams input { width: 90px; padding: 6px 8px; }
