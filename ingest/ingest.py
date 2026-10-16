@@ -28,6 +28,13 @@ from parse_xml import parse_prices, parse_promos, parse_stores  # noqa: E402
 
 # Extra margin (km) when pre-filtering branches by their city's centre.
 CITY_MARGIN_KM = 4
+# Keep the database small (Supabase free tier = 500MB): per area keep only the
+# nearest few branches of each chain, and a hard cap per area.
+MAX_PER_CHAIN_PER_AREA = int(os.environ.get("MAX_PER_CHAIN_PER_AREA", "2"))
+MAX_PER_AREA = int(os.environ.get("MAX_PER_AREA", "30"))
+MAX_DB_MB = int(os.environ.get("MAX_DB_MB", "400"))
+# Convenience / pharmacy / factory-outlet chains - not useful for a weekly basket.
+SKIP_SCRAPERS = {"YELLOW", "DOR_ALON", "GOOD_PHARM", "SUPER_PHARM", "BAREKET"}
 MAX_PROMO_ITEMS = 3000
 
 STAMP_RE = re.compile(r"(\d{8})-?(\d{4,6})")
@@ -183,23 +190,24 @@ def select_tracked(conn) -> list[tuple]:
         log(f"area {label}: city={city} center={lat},{lon} r={radius}km")
 
     with conn.cursor() as cur:
-        cur.execute("select id, chain_id, name, address, city, lat, lon, is_online from branches")
+        cur.execute(
+            """select b.id, b.chain_id, b.name, b.address, b.city, b.lat, b.lon, b.is_online
+               from branches b join chains c using (chain_id)
+               where coalesce(c.scraper, '') <> all(%s)""",
+            (list(SKIP_SCRAPERS),),
+        )
         branches = cur.fetchall()
 
-    tracked: set[int] = set()
+    # per area: [(distance, chain_id, branch_id)]
+    per_area: list[list[tuple[float, str, int]]] = [[] for _ in resolved]
     nearest_online: dict[str, tuple[float, int]] = {}
     for bid, chain_id, name, address, city, lat, lon, is_online in branches:
         bcity = norm_city(city)
         center = city_center(conn, city) if city else None
         best = None
-        for _label, acity, alat, alon, radius in resolved:
-            if acity and bcity == acity:
-                best = 0.0
-                break
-            if alat is None or center is None:
-                continue
-            d = haversine_km(alat, alon, *center)
-            if d <= radius + CITY_MARGIN_KM:
+        for i, (_label, acity, alat, alon, radius) in enumerate(resolved):
+            d = None
+            if alat is not None and center is not None and haversine_km(alat, alon, *center) <= radius + CITY_MARGIN_KM:
                 # candidate: geocode the exact address and re-check
                 if lat is None and address:
                     pt = geocode(f"{address}, {city}, ישראל") or center
@@ -208,8 +216,15 @@ def select_tracked(conn) -> list[tuple]:
                         cur.execute("update branches set lat=%s, lon=%s where id=%s", (lat, lon, bid))
                     conn.commit()
                 d = haversine_km(alat, alon, lat or center[0], lon or center[1])
-                if d <= radius:
-                    best = d if best is None else min(best, d)
+                if d > radius:
+                    d = None
+            if d is None and acity and bcity == acity:
+                d = 0.0
+            if d is None:
+                continue
+            best = d if best is None else min(best, d)
+            if not is_online:
+                per_area[i].append((d, chain_id, bid))
         if is_online:
             # one online store per chain: the one closest to any area
             if center is not None:
@@ -221,9 +236,20 @@ def select_tracked(conn) -> list[tuple]:
                         nearest_online[chain_id] = (d, bid)
             if best is not None:
                 nearest_online[chain_id] = (-1, bid)
-            continue
-        if best is not None:
+
+    tracked: set[int] = set()
+    for (label, *_rest), cands in zip(resolved, per_area):
+        per_chain: dict[str, int] = {}
+        kept = 0
+        for d, chain_id, bid in sorted(cands):
+            if kept >= MAX_PER_AREA:
+                break
+            if per_chain.get(chain_id, 0) >= MAX_PER_CHAIN_PER_AREA:
+                continue
+            per_chain[chain_id] = per_chain.get(chain_id, 0) + 1
             tracked.add(bid)
+            kept += 1
+        log(f"area {label}: {len(cands)} branches in radius, tracking {kept}")
     tracked.update(bid for _d, bid in nearest_online.values())
 
     with conn.cursor() as cur:
@@ -308,6 +334,12 @@ def load_promos(conn, branch_id: int, chain_id: str, promos: list[dict]) -> None
     conn.commit()
 
 
+def db_size_mb(conn) -> float:
+    with conn.cursor() as cur:
+        cur.execute("select pg_database_size(current_database()) / 1048576.0")
+        return float(cur.fetchone()[0])
+
+
 def ingest_prices(conn, tracked_rows) -> None:
     by_scraper: dict[str, list[tuple]] = {}
     for bid, store_id, scraper, chain_id in tracked_rows:
@@ -320,6 +352,9 @@ def ingest_prices(conn, tracked_rows) -> None:
         log(f"prices: {scraper} ({len(branches)} branches)")
         paths = fetch(enum, [FileTypesFilters.PRICE_FULL_FILE.name, FileTypesFilters.PROMO_FULL_FILE.name], regex)
         for bid, store_id, chain_id in branches:
+            if db_size_mb(conn) > MAX_DB_MB:
+                log(f"database above {MAX_DB_MB}MB - stopping price loading")
+                return
             pat = re.compile(rf"-0*{int(store_id)}-\d{{8}}", re.I)
             mine = [p for p in paths if pat.search(os.path.basename(p))]
             price_files = [p for p in mine if "pricefull" in os.path.basename(p).lower()]
