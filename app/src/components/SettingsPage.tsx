@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
+import { errorText } from "../lib/errors";
 import { loadSettings, saveSettings, type Settings } from "../settings";
 
 type Area = { id: number; label: string; city: string | null; lat: number | null; lon: number | null; radius_km: number };
@@ -31,7 +32,7 @@ export default function SettingsPage() {
   async function addCity() {
     if (!city.trim()) return;
     const { error } = await supabase.from("user_areas").insert({ label: city.trim(), city: city.trim(), radius_km: radius });
-    if (error) setMsg(error.message);
+    if (error) setMsg(errorText(error));
     else {
       setCity("");
       setMsg("נוסף. הסניפים באזור ייכנסו למעקב בריצת האיסוף הבאה.");
@@ -46,7 +47,7 @@ export default function SettingsPage() {
         const { error } = await supabase.from("user_areas").insert({
           label: "המיקום שלי", lat: pos.coords.latitude, lon: pos.coords.longitude, radius_km: radius,
         });
-        setMsg(error ? error.message : "המיקום נוסף. הסניפים באזור ייכנסו למעקב בריצת האיסוף הבאה.");
+        setMsg(error ? errorText(error) : "המיקום נוסף. הסניפים באזור ייכנסו למעקב בריצת האיסוף הבאה.");
         load();
       },
       (e) => setMsg(e.message),
@@ -86,8 +87,8 @@ export default function SettingsPage() {
           ))}
         </ul>
         <div className="row">
-          <input placeholder="עיר (למשל רמלה)" value={city} onChange={(e) => setCity(e.target.value)} />
-          <select value={radius} onChange={(e) => setRadius(Number(e.target.value))}>
+          <input aria-label="עיר" placeholder="עיר (למשל רמלה)" value={city} onChange={(e) => setCity(e.target.value)} />
+          <select aria-label="רדיוס" value={radius} onChange={(e) => setRadius(Number(e.target.value))}>
             {[2, 5, 10, 15, 25].map((r) => (
               <option key={r} value={r}>{r} ק"מ</option>
             ))}

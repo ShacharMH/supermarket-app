@@ -27,7 +27,7 @@ test("shows a readable message when the server fails", async ({ page }) => {
   });
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
-  await expect(page.locator(".error")).toContainText("statement timeout");
+  await expect(page.locator(".error")).toContainText("השרת עמוס");
   await expect(page.locator("body")).not.toContainText("[object Object]");
 });
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
+import { errorText } from "../lib/errors";
 import { parseReceiptCsv, type ReceiptRow } from "../lib/basket";
 
 type Branch = { id: number; name: string | null; city: string | null; chains: { name: string } | null };
@@ -69,14 +70,14 @@ export default function ReceiptsPage() {
       .single();
     if (error || !receipt) {
       setBusy(false);
-      return setMsg(error?.message ?? "שגיאה");
+      return setMsg(errorText(error ?? "שגיאה"));
     }
     const { error: e2 } = await supabase.from("receipt_items").insert(
       rows.map((r) => ({ receipt_id: receipt.id, raw_name: r.name, barcode: r.barcode?.replace(/^0+/, "") || null, quantity: r.qty, price: r.price })),
     );
     if (e2) {
       setBusy(false);
-      return setMsg(e2.message);
+      return setMsg(errorText(e2));
     }
     const { data: matched } = await supabase.rpc("resolve_receipt", { p_receipt: receipt.id });
     const withBarcode = rows.filter((r) => r.barcode).length;
@@ -117,7 +118,7 @@ export default function ReceiptsPage() {
           </table>
           <p className="muted small">את הסניף בוחרים ברשימה למטה, לא בקובץ.</p>
         </details>
-        <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+        <select aria-label="סניף הקנייה" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
           <option value="">באיזה סניף? (משפר זיהוי)</option>
           {branches.map((b) => (
             <option key={b.id} value={b.id}>
@@ -125,8 +126,8 @@ export default function ReceiptsPage() {
             </option>
           ))}
         </select>
-        <input type="file" accept=".csv,.tsv,.txt,text/csv" onChange={(e) => onFile(e.target.files?.[0])} />
-        <textarea rows={6} value={text} placeholder={SAMPLE} onChange={(e) => preview(e.target.value)} dir="auto" />
+        <input aria-label="קובץ CSV של קבלה" type="file" accept=".csv,.tsv,.txt,text/csv" onChange={(e) => onFile(e.target.files?.[0])} />
+        <textarea aria-label="טבלת הקבלה" rows={6} value={text} placeholder={SAMPLE} onChange={(e) => preview(e.target.value)} dir="auto" />
         {rows.length > 0 && (
           <table className="tbl preview">
             <thead>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import { loadSettings } from "../settings";
 import ShoppingList from "./ShoppingList";
+import { errorText } from "../lib/errors";
 import {
   bestSplits, parseList, rankStores, resolveItem,
   type BranchRow, type BuyMode, type Product, type ResolvedItem, type SplitOption, type StoreOption,
@@ -47,17 +48,40 @@ export default function ListPage() {
     })();
   }, []);
 
+  const pending = useRef<string | null>(null);
+
+  async function saveList(v: string) {
+    pending.current = null;
+    if (listId) await supabase.from("shopping_lists").update({ items: { text: v }, updated_at: new Date().toISOString() }).eq("id", listId);
+    else {
+      const { data } = await supabase.from("shopping_lists").insert({ items: { text: v } }).select("id").single();
+      if (data) setListId(data.id);
+    }
+  }
+
   function onText(v: string) {
     setText(v);
+    pending.current = v;
     window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(async () => {
-      if (listId) await supabase.from("shopping_lists").update({ items: { text: v }, updated_at: new Date().toISOString() }).eq("id", listId);
-      else {
-        const { data } = await supabase.from("shopping_lists").insert({ items: { text: v } }).select("id").single();
-        if (data) setListId(data.id);
-      }
-    }, 800);
+    saveTimer.current = window.setTimeout(() => saveList(v), 800);
   }
+
+  // don't lose the last keystrokes when the app is switched away or closed
+  useEffect(() => {
+    const flush = () => {
+      if (pending.current !== null) {
+        window.clearTimeout(saveTimer.current);
+        saveList(pending.current);
+      }
+    };
+    const onVisibility = () => document.visibilityState === "hidden" && flush();
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  });
 
   async function compare() {
     const settings = loadSettings();
@@ -135,9 +159,7 @@ export default function ListPage() {
       const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
       setResult({ items: resolved, results, stores, splits, strict });
     } catch (e) {
-      // Supabase errors are plain objects with a message, not Error instances
-      const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
-      setError(`משהו השתבש: ${msg}`);
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -298,7 +320,7 @@ export default function ListPage() {
                 {(result.results.get(it.key) ?? []).length === 0 ? (
                   <div className="warn">לא נמצא מוצר תואם</div>
                 ) : (
-                  <select value={it.preferred[0] ?? ""} onChange={(e) => pin(it.key, e.target.value)}>
+                  <select aria-label={`איזה מוצר עבור ${it.key}`} value={it.preferred[0] ?? ""} onChange={(e) => pin(it.key, e.target.value)}>
                     <option value="">כל מוצר דומה (הכי זול)</option>
                     {(result.results.get(it.key) ?? []).map((p) => (
                       <option key={p.barcode} value={p.barcode}>

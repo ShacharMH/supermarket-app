@@ -4,6 +4,7 @@
   --text: #111827;
   --muted: #6b7280;
   --line: #e5e7eb;
+  --chip: #eef0f3;
   --accent: #0f766e;
   --accent-ink: #ffffff;
   --promo: #b45309;
@@ -19,6 +20,7 @@
     --text: #e5e7eb;
     --muted: #9ca3af;
     --line: #273140;
+    --chip: #1f2833;
     --accent: #2dd4bf;
     --accent-ink: #042f2e;
     --promo: #fcd34d;
@@ -69,7 +71,7 @@ details > summary { cursor: pointer; padding: 6px 0; list-style-position: inside
 .lprice { white-space: nowrap; }
 .tag { display: inline-block; font-size: 0.72rem; padding: 1px 6px; border-radius: 999px; margin-inline-start: 6px; vertical-align: middle; }
 .tag.promo { background: var(--promo-bg); color: var(--promo); }
-.tag.alt { background: var(--line); color: var(--muted); }
+.tag.alt { background: var(--chip); color: var(--text); }
 .tag.miss { background: none; color: var(--warn); border: 1px solid var(--warn); }
 .item { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .ikey { font-weight: 700; }
