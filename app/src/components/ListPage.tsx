@@ -5,7 +5,7 @@ import ShoppingList from "./ShoppingList";
 import { errorText } from "../lib/errors";
 import {
   bestSplits, maker, parseList, rankStores, resolveItem,
-  type BranchRow, type BuyMode, type Product, type ResolvedItem, type SplitOption, type StoreOption,
+  type BranchRow, type BuyMode, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
 type Result = {
@@ -120,16 +120,29 @@ export default function ListPage() {
         return [];
       };
       const results = new Map<string, Product[]>();
+      const lookup = async (it: ListItem) => {
+        // Weighed goods (butcher, deli, produce) use per-chain codes and are searched separately.
+        const [packaged, weighed] = await Promise.all([
+          it.byWeight ? Promise.resolve([]) : search("search_products", it.key, 40),
+          // no relaxing here: "חלב 3%" -> "חלב" would find halva and toffees
+          search("search_weighed", it.key, 40, !!it.byWeight),
+        ]);
+        const seen = new Set(packaged.map((p) => p.barcode));
+        return [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))];
+      };
       await Promise.all(
-        items.map(async (it) => {
-          // Weighed goods (butcher, deli, produce) use per-chain codes and are searched separately.
-          const [packaged, weighed] = await Promise.all([
-            it.byWeight ? Promise.resolve([]) : search("search_products", it.key, 40),
-            // no relaxing here: "חלב 3%" -> "חלב" would find halva and toffees
-            search("search_weighed", it.key, 40, !!it.byWeight),
-          ]);
-          const seen = new Set(packaged.map((p) => p.barcode));
-          results.set(it.key, [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))]);
+        items.map(async (it, i) => {
+          let found = await lookup(it);
+          // "7 אפ": the leading number was part of the name, not a count
+          if (it.raw && (!found.length || it.key.length <= 2)) {
+            const asName: ListItem = { ...it, key: it.raw, qty: 1, raw: undefined };
+            const byName = await lookup(asName);
+            if (byName.length) {
+              items[i] = asName;
+              found = byName;
+            }
+          }
+          results.set(items[i].key, found);
         }),
       );
       const resolved = items.map((it) =>
@@ -144,6 +157,8 @@ export default function ListPage() {
           key: r.key,
           qty: r.qty,
           candidates: r.candidates.map((c) => c.barcode),
+          qtys: r.qtys,
+          factors: r.factors,
           // a weighed item's code exists in one chain only, so preferring it would
           // penalise every other chain's equivalent - compare them on price alone
           preferred: r.weighted && !strict.has(r.key) ? [] : r.preferred,

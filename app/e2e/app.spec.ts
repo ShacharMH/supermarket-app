@@ -180,6 +180,25 @@ test("settings show the app version and an update button", async ({ page }) => {
   await expect(page.getByRole("button", { name: /בדיקת עדכונים/ })).toBeVisible();
 });
 
+test("a requested size is filled with the right number of packs", async ({ page }) => {
+  const four = { ...PRODUCT, barcode: "4l", name: "אקונומיקה 4 ל'", quantity: 4000, unit_of_measure: 'מ"ל' };
+  const one = { ...PRODUCT, barcode: "1l", name: "אקונומיקה 1 ליטר", quantity: 1, unit_of_measure: "ליטר" };
+  const tiny = { ...PRODUCT, barcode: "05", name: "אקונומיקה 500 מ\"ל", quantity: 500, unit_of_measure: 'מ"ל' };
+  let payload = "";
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: JSON.parse(body).term === "אקונומיקה" ? [tiny, four, one] : [] });
+    if (url.includes("rpc/price_basket")) payload = body;
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "אקונומיקה 5 ליטר" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect.poll(() => payload).not.toBe("");
+  const item = JSON.parse(payload).items[0];
+  expect(item.candidates).toEqual(["4l", "1l"]);
+  expect(item.qtys).toEqual({ "4l": 1, "1l": 5 });
+});
+
 test("empty data explains what to do", async ({ page }) => {
   await mockSupabase(page, (r, url) => {
     if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "חלב" } }] });

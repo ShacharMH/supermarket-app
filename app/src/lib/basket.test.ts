@@ -13,7 +13,7 @@ const branch = (id: number, lines: ReturnType<typeof line>[], online = false): B
 describe("parseList", () => {
   it("parses quantities without eating product attributes", () => {
     expect(parseList("2 קוטג\nחלב 3%\nלחם x3\n- ביצים\nחלב 3%")).toEqual([
-      { key: "קוטג", qty: 2 },
+      { key: "קוטג", qty: 2, raw: "2 קוטג" },
       { key: "חלב 3%", qty: 2 },
       { key: "לחם", qty: 3 },
       { key: "ביצים", qty: 1 },
@@ -151,11 +151,12 @@ describe("weighed goods", () => {
     expect(resolveItem({ key: "עגבניות", qty: 1 }, [w("a")], [], new Map()).qty).toBe(1);
   });
   it("a weight on a packaged product picks that pack size", () => {
-    const results = [prod("500g", 500, "גרם"), prod("250g", 250, "גרם")];
+    const results = [prod("500g", 500, "גרם"), prod("250g", 250, "גרם"), prod("1kg", 1, "קג")];
     const r = resolveItem({ key: "קוטג", qty: 2, weightKg: 0.25 }, results, [], new Map());
     expect(r.weighted).toBe(false);
-    expect(r.qty).toBe(2);
-    expect(r.candidates.map((c) => c.barcode)).toEqual(["250g"]);
+    expect(r.reference?.barcode).toBe("250g");
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["500g", "250g"]);
+    expect(r.qtys).toEqual({ "500g": 2, "250g": 2 });
   });
   it("strict pin allows no substitutes", () => {
     const results = [prod("a", 250, "גרם"), prod("b", 250, "גרם")];
@@ -199,7 +200,8 @@ describe("pack sizes in the list", () => {
     const results = [prod("small", 500, 'מ"ל', 20), prod("big4", 4, "ליטר"), prod("big5", 5000, "מל"), prod("1l", 1, "ליטר")];
     const r = resolveItem({ key: "אקונומיקה", qty: 1, volumeL: 5 }, results, [], new Map());
     expect(r.reference?.barcode).toBe("big5");
-    expect(r.candidates.map((c) => c.barcode)).toEqual(["big4", "big5"]);
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["big4", "big5", "1l"]);
+    expect(r.qtys).toEqual({ big4: 1, big5: 1, "1l": 5 });
   });
   it("falls back to the nearest size when the exact one is missing", () => {
     const r = resolveItem({ key: "אקונומיקה", qty: 1, volumeL: 5 }, [prod("small", 500, 'מ"ל'), prod("big4", 4, "ליטר")], [], new Map());
@@ -218,10 +220,35 @@ describe("pack size from the product name", () => {
       named("small", "סיף ג'ל אקונומיקה 750 מ\"ל", 750, 'מ"ל'),
     ];
     const r = resolveItem({ key: "אקונומיקה", qty: 1, volumeL: 5 }, results, [], new Map());
-    expect(r.candidates.map((c) => c.barcode)).toEqual(["touch", "kings", "plain"]);
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["touch", "kings", "plain", "sano1"]);
+    expect(r.qtys).toMatchObject({ touch: 1, sano1: 5 });
   });
   it("reads gram sizes glued to the number", () => {
     const results = [named("a", "קוטג' 5% 250ג'", 1, "יחידות"), named("b", "קוטג 5% 500 גרם", 500, "גרם")];
     expect(resolveItem({ key: "קוטג", qty: 1, weightKg: 0.25 }, results, [], new Map()).reference?.barcode).toBe("a");
+  });
+});
+
+describe("quantities and sizes", () => {
+  it("counts with units, and numbers that are part of a name", () => {
+    expect(parseList("ביצים 2 חבילות\nקולה 6 בקבוקים\nנקה 7\n3 ב-1 שמפו\nבמבה 80\n5 קוטג\n7 אפ")).toEqual([
+      { key: "ביצים", qty: 2 },
+      { key: "קולה", qty: 6 },
+      { key: "נקה 7", qty: 1 },
+      { key: "3 ב-1 שמפו", qty: 1 },
+      { key: "במבה 80", qty: 1 },
+      { key: "קוטג", qty: 5, raw: "5 קוטג" },
+      { key: "אפ", qty: 7, raw: "7 אפ" },
+    ]);
+  });
+  it("buys enough packs to reach the requested size", () => {
+    const results = [prod("4l", 4, "ליטר"), prod("1l", 1, "ליטר"), prod("2.5l", 2500, "מל"), prod("750", 750, "מל")];
+    const r = resolveItem({ key: "אקונומיקה", qty: 1, volumeL: 5 }, results, [], new Map());
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["4l", "1l", "2.5l"]);
+    expect(r.qtys).toEqual({ "4l": 1, "1l": 5, "2.5l": 2 });
+  });
+  it("compares similar packs per gram", () => {
+    const r = resolveItem({ key: "קוטג", qty: 1 }, [prod("250", 250, "גרם"), prod("300", 300, "גרם")], [], new Map());
+    expect(r.factors).toEqual({ "300": 0.833 });
   });
 });

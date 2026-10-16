@@ -1,7 +1,14 @@
 // Pure shopping-basket logic (no I/O) so it can be unit-tested.
 
 /** key: what to search for (and pin preferences by); qty: count, or kg for weighed items. */
-export type ListItem = { key: string; qty: number; weightKg?: number; volumeL?: number; byWeight?: boolean };
+export type ListItem = {
+  key: string;
+  qty: number;
+  weightKg?: number;
+  volumeL?: number;
+  byWeight?: boolean;
+  raw?: string; // the line before a leading count was taken off ("7 אפ"), to retry as a name
+};
 
 // Words that say "from the counter, sold by weight" - they never appear in product names.
 const BY_WEIGHT_RE = /(^|\s)(מה?קצביה|מה?אטליז|מה?מעדניה|מה?מעדנייה|מהדלפק|במשקל|שקילה?)(?=\s|$)/g;
@@ -21,6 +28,8 @@ export type Product = {
 export type ResolvedItem = ListItem & {
   weighted: boolean; // sold by weight: qty is kilograms and prices are per kg
   candidates: Product[];
+  qtys?: Record<string, number>; // packs of each candidate that fill a requested size
+  factors?: Record<string, number>; // per-gram/ml comparison factor for similar packs
   preferred: string[]; // barcodes; empty = no preference, any candidate is fine
   reference: Product | null;
 };
@@ -76,6 +85,9 @@ const WEIGHT_RE = /(\d+(?:[.,]\d+)?)\s*(ק"ג|ק״ג|קג|קילוגרם|קיל�
 // "5 ליטר", "1.5 ל'", "750 מ\"ל" - a pack size (liquids are never sold by weight)
 const VOLUME_RE = /(\d+(?:[.,]\d+)?)\s*(ליטרים|ליטר|ל'|ל׳|מ"ל|מ״ל|מל|מיליליטר|ml|lt|l)(?=\s|$)/i;
 
+// "5 יחידות", "3 יח'", "4 בקבוקים", "2 חבילות" anywhere in the line
+const COUNT_RE = /(\d+)\s*(יחידות|יחידה|יח'|יח׳|יח|פריטים|חבילות|חבילה|אריזות|קופסאות|בקבוקים|שקיות|פחיות)(?=\s|$)/;
+
 function toLitres(amount: number, unit: string): number {
   return /^(ליטרים|ליטר|ל'|ל׳|lt|l)$/i.test(unit) ? amount : amount / 1000;
 }
@@ -109,8 +121,17 @@ export function parseList(text: string): ListItem[] {
       line = line.replace(BY_WEIGHT_RE, " ").replace(/\s+/g, " ").trim();
     }
     let qty = 1;
-    const lead = line.match(/^(\d+(?:\.\d+)?)\s*(?:x|×|\*)?\s+(.+)$/i);
-    const trail = line.match(/^(.+?)\s*(?:x|×|\*)\s*(\d+(?:\.\d+)?)$/i);
+    let counted = false;
+    const c = line.match(COUNT_RE);
+    if (c) {
+      qty = parseInt(c[1], 10);
+      counted = true;
+      line = (line.slice(0, c.index) + line.slice((c.index ?? 0) + c[0].length)).replace(/\s+/g, " ").trim();
+    }
+    const beforeCount = line;
+    // a leading number is a count ("5 קוטג") unless it is part of a name ("3 ב-1 שמפו")
+    const lead = counted ? null : line.match(/^(\d+(?:\.\d+)?)\s*(?:x|×|\*)?\s+(?!ב-?\s*\d)(?!%)(.+)$/i);
+    const trail = counted ? null : line.match(/^(.+?)\s*(?:x|×|\*)\s*(\d+(?:\.\d+)?)$/i);
     if (lead) {
       qty = parseFloat(lead[1]);
       line = lead[2];
@@ -123,6 +144,7 @@ export function parseList(text: string): ListItem[] {
     if (weightKg) item.weightKg = weightKg;
     if (volumeL) item.volumeL = volumeL;
     if (byWeight) item.byWeight = true;
+    if (lead) item.raw = beforeCount;
     out.push(item);
   }
   // merge duplicates
@@ -268,21 +290,48 @@ export function resolveItem(
   if (mode === "pack" && !packed.length) mode = "weight";
 
   const pool = mode === "weight" ? weighed : packed;
+  const wanted: [string, number] | null =
+    mode === "pack" && item.volumeL ? ["ml", item.volumeL * 1000]
+    : mode === "pack" && item.weightKg ? ["g", item.weightKg * 1000]
+    : null;
   let reference = pool.find((r) => r.barcode === preferred[0]) ?? null;
-  if (!reference && mode === "pack" && (item.weightKg || item.volumeL)) {
-    // "קוטג 250 גרם", "אקונומיקה 5 ליטר": the pack closest to that size
-    reference = closestPack(pool, item.volumeL ? ["ml", item.volumeL * 1000] : ["g", item.weightKg! * 1000]);
-  }
+  if (!reference && wanted) reference = closestPack(pool, wanted); // "אקונומיקה 5 ליטר"
   reference ??= pool[0];
   const weighted = mode === "weight";
-  const candidates =
-    opts.strict && isPinned
-      ? results.filter((r) => preferred.includes(r.barcode))
-      : results.filter((r) => preferred.includes(r.barcode) || similarSize(r, reference));
+  let candidates: Product[];
+  const qtys: Record<string, number> = {};
+  const factors: Record<string, number> = {};
+  if (opts.strict && isPinned) {
+    candidates = results.filter((r) => preferred.includes(r.barcode));
+  } else if (wanted) {
+    // a size was asked for: any pack of that kind from 20% to 200% of it, bought in
+    // as many packs as it takes (5 litres = 1 x 4L or 5 x 1L), compared on the total
+    const [unit, amount] = wanted;
+    candidates = pool.filter((r) => {
+      const a = baseAmount(r);
+      return preferred.includes(r.barcode) || (a && a[0] === unit && a[1] >= amount * 0.2 && a[1] <= amount * 2);
+    });
+  } else {
+    candidates = results.filter((r) => preferred.includes(r.barcode) || similarSize(r, reference));
+  }
+  const ref = baseAmount(reference);
+  for (const r of candidates) {
+    const a = baseAmount(r);
+    if (weighted || !a) continue;
+    if (wanted && a[0] === wanted[0]) {
+      qtys[r.barcode] = Math.max(1, Math.round(wanted[1] / a[1])) * item.qty;
+    } else if (!wanted && ref && a[0] === ref[0] && a[1] !== ref[1]) {
+      // similar packs compared per gram/ml: 300g for 7 beats 250g for 6.50
+      factors[r.barcode] = Math.round((ref[1] / a[1]) * 1000) / 1000;
+    }
+  }
   // weighed goods: qty is kilograms; packaged goods: qty is a count
   const kgEach = item.weightKg ?? opts.weightKg ?? hintKg ?? 1;
   const qty = weighted ? Math.round(kgEach * item.qty * 1000) / 1000 : item.qty;
-  return { ...item, qty, weighted, candidates, preferred, reference };
+  const out: ResolvedItem = { ...item, qty, weighted, candidates, preferred, reference };
+  if (Object.keys(qtys).length) out.qtys = qtys;
+  if (Object.keys(factors).length) out.factors = factors;
+  return out;
 }
 
 function sum(xs: number[]): number {
