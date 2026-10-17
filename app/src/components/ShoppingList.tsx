@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { howMuch, maker, packSize, promoHint, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
+import { howMuch, lineWeighed, maker, packSize, promoHint, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
 import ShopMode from "./ShopMode";
 import { groupByCategory } from "../lib/categories";
 
@@ -64,7 +64,7 @@ export default function ShoppingList({
       <ul className="shoplist">
         {items.map((l) => {
           const p = products.get(l.barcode);
-          const isW = weighted.has(l.key);
+          const isW = lineWeighed(l, weighted, products);
           const size = packSize(p);
           const code = shelfBarcode(l.barcode);
           return (

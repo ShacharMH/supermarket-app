@@ -210,8 +210,11 @@ def infer_missing_cities(conn) -> None:
         missing = cur.fetchall()
         fixed = 0
         for bid, name, address in missing:
-            text = f" {norm_city(name)} {norm_city(address)} "
-            hit = next((c for c in known if f" {c} " in text), None)
+            # the store name first: Yohananof "רמלה" is on "שדרות ירושלים", which is a
+            # street, not the city - so street names in the address are skipped too
+            street = re.sub(r"(שד'|שדרות|שד|רחוב|רח'|רח|דרך|כביש)\s+\S+", " ", address or "")
+            hit = next((c for text in (f" {norm_city(name)} ", f" {norm_city(street)} ")
+                        for c in known if f" {c} " in text), None)
             if hit:
                 cur.execute("update branches set city = %s where id = %s", (hit, bid))
                 fixed += 1

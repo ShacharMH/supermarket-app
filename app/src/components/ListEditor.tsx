@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabase";
-import { lineAmount, parseList, setLineQty, setLineUnits, setLineWeight, unitWeight } from "../lib/basket";
+import { defaultKg, lineAmount, parseList, setLineQty, setLineUnits, setLineWeight, unitWeight } from "../lib/basket";
+import { fetchKinds, loadKinds, onKindsChange } from "../lib/termKinds";
 import { categoryOf } from "../lib/categories";
 
 const RECENT_KEY = "recent-terms";
@@ -36,6 +37,17 @@ export default function ListEditor({ text, onChange }: { text: string; onChange:
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const timer = useRef<number | undefined>(undefined);
   const lines = text.split("\n").filter((l) => l.trim());
+  // by weight or packaged, for items the built-in hints don't know ("גאודה עיזים")
+  const [kinds, setKinds] = useState(loadKinds);
+  const termsKey = lines.map((l) => parseList(l)[0]?.key ?? "").join("\n");
+  useEffect(() => {
+    let stale = false;
+    fetchKinds(termsKey.split("\n").filter(Boolean)).then((k) => !stale && setKinds(k));
+    return () => {
+      stale = true;
+    };
+  }, [termsKey]);
+  useEffect(() => onKindsChange(() => setKinds(loadKinds())), []);
 
   const setLines = (ls: string[]) => onChange(ls.join("\n"));
 
@@ -124,7 +136,7 @@ export default function ListEditor({ text, onChange }: { text: string; onChange:
         <ul className="list-rows">
           {lines.map((line, i) => {
             const it = parseList(line)[0];
-            const amt = lineAmount(line);
+            const amt = lineAmount(line, kinds[it?.key ?? ""]);
             if (!it || !amt) return null;
             const cat = categoryOf(it.key);
             const update = (l: string) => setLines(lines.map((x, j) => (j === i ? l : x)));
@@ -154,7 +166,7 @@ export default function ListEditor({ text, onChange }: { text: string; onChange:
                 ) : (
                   <>
                     {amt.canKg ? (
-                      <button className="unit-chip" aria-label={`לקנות ${it.key} במשקל`} onClick={() => update(setLineWeight(line, amt.approxKg && amt.approxKg >= 0.25 ? Math.round(amt.approxKg * 4) / 4 : 1))}>
+                      <button className="unit-chip" aria-label={`לקנות ${it.key} במשקל`} onClick={() => update(setLineWeight(line, amt.approxKg && amt.approxKg >= 0.25 ? Math.round(amt.approxKg * 4) / 4 : defaultKg(it.key)))}>
                         🔢 יח'
                       </button>
                     ) : (

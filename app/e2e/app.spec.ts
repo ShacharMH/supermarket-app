@@ -398,3 +398,32 @@ test("list editor: a late search reply doesn't reopen suggestions after adding",
   await page.waitForTimeout(1200); // both replies have arrived
   await expect(page.getByRole("listbox", { name: "הצעות" })).toHaveCount(0);
 });
+
+test("deli items the app doesn't know come in grams; a pack can win per gram", async ({ page }) => {
+  const deli = { ...PRODUCT, barcode: "a:1", name: "גאודה עיזים", is_weighted: true, quantity: null, unit_of_measure: null };
+  const triangle = { ...PRODUCT, barcode: "7290000000777", name: "משולש גאודה עיזים 160 גרם", quantity: 160 };
+  let payload = "";
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/term_kinds"))
+      return r.fulfill({ json: JSON.parse(body).terms.map((term: string) => ({ term, weighed_start: term === "גאודה עיזים" ? 19 : 0, packed_start: 3, weighed_all: 27, packed_all: 7 })) });
+    if (url.includes("rpc/search_weighed")) return r.fulfill({ json: [deli] });
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: [triangle] });
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "גאודה עיזים" } }] });
+    if (url.includes("rpc/price_basket")) {
+      payload = body;
+      return r.fulfill({ json: [{ ...ROWS[0], lines: [{ key: "גאודה עיזים", qty: 1, barcode: triangle.barcode, name: triangle.name, price: 20.9, total: 20.9, promo: null, promo_min_qty: null, preferred: true }] }] });
+    }
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  const row = page.locator(".list-row").first();
+  await expect(row.locator(".qty")).toHaveText("200 גרם");
+  await page.getByRole("button", { name: "עוד גאודה עיזים" }).click();
+  await expect(row.locator(".qty")).toHaveText("300 גרם");
+  await page.getByRole("button", { name: "פחות גאודה עיזים" }).click();
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best .shoplist li").first()).toContainText("1 יח'"); // the pack, not "1 ק\"ג"
+  const item = JSON.parse(payload).items[0];
+  expect(item.qty).toBe(0.2);
+  expect(item.candidates.sort()).toEqual(["7290000000777", "a:1"]);
+});

@@ -1,4 +1,5 @@
 // Pure shopping-basket logic (no I/O) so it can be unit-tested.
+import { categoryOf } from "./categories";
 
 /** key: what to search for (and pin preferences by); qty: count, or kg for weighed items. */
 export type ListItem = {
@@ -284,6 +285,28 @@ export function weighedHint(term: string): number | null {
   return null;
 }
 
+/** The usual amount of a weighed item: a kilo of produce, half a kilo of meat, 200g from the deli. */
+export function defaultKg(term: string): number {
+  const hint = weighedHint(term);
+  if (hint !== null) return hint;
+  const cat = categoryOf(term).id;
+  return cat === "produce" ? 1 : cat === "meat" ? 0.5 : 0.2;
+}
+
+/**
+ * What the shelves say about a term (from term_kinds): "weight" - mostly sold by
+ * weight (the deli's "גאודה עיזים"), "either" - some weighed products exist,
+ * "pack" - only packaged.
+ */
+export type TermKind = "weight" | "either" | "pack";
+export type TermCounts = { weighed_start: number; packed_start: number; weighed_all: number; packed_all: number };
+
+export function termKind(c: TermCounts): TermKind {
+  const [w, p] = c.weighed_start + c.packed_start > 0 ? [c.weighed_start, c.packed_start] : [c.weighed_all, c.packed_all];
+  if (w + p > 0 && w / (w + p) >= 0.5) return "weight";
+  return c.weighed_all > 0 ? "either" : "pack";
+}
+
 // same normalisation as the database: no quotes, final letters as regular letters
 export const normName = (s: string) =>
   s.replace(/["'`׳״]/g, "").toLowerCase().replace(/[ךםןףץ]/g, (c) => "כמנפצ"["ךםןףץ".indexOf(c)]).replace(/\s+/g, " ").trim();
@@ -349,9 +372,13 @@ export function resolveItem(
 
   const hintKg = weighedHint(item.key);
   let mode: BuyMode | undefined = opts.mode ?? (item.byWeight ? "weight" : undefined);
+  // nobody said how it is bought: deli and packaged products may compete on price per gram
+  const auto = !mode && !isPinned && !boughtHere.length;
   if (!mode && isPinned) mode = results.find((r) => r.barcode === preferred[0])!.is_weighted ? "weight" : "pack";
   if (!mode && boughtHere.length) mode = boughtHere[0].is_weighted ? "weight" : "pack";
   if (!mode && hintKg !== null && weighed.length) mode = "weight";
+  // "2 גאודה עיזים" / "גאודה עיזים 1 יח'": whole packages, unless pieces of produce
+  if (!mode && hintKg === null && item.counted && unitWeight(item.key) === null && packed.length) mode = "pack";
   if (!mode) {
     // what the shelf says: among products whose name starts with the term, are most weighed?
     const key = normName(item.key);
@@ -409,8 +436,25 @@ export function resolveItem(
   const kgEach =
     item.weightKg ??
     (item.counted ? unitWeight(item.key) : null) ??
-    opts.weightKg ?? hintKg ?? 1;
+    opts.weightKg ?? defaultKg(item.key);
   const qty = weighted ? Math.round(kgEach * item.qty * 1000) / 1000 : item.qty;
+  // deli-type items only: produce and fresh meat aren't swapped for packed ones
+  const deliLike = hintKg !== null ? hintKg < 0.5 : !["produce", "meat"].includes(categoryOf(item.key).id);
+  if (weighted && auto && !opts.strict && deliLike) {
+    // 200g of goat gouda: the deli at ₪98/kg (₪19.60) vs a 160g pack at ₪20.90,
+    // compared per gram; packs only when 1-3 of them come close to the amount
+    const wantG = qty * 1000;
+    for (const r of packed) {
+      const a = baseAmount(r);
+      if (!a || a[0] !== "g") continue;
+      const packs = Math.max(1, Math.round(wantG / a[1]));
+      const got = packs * a[1];
+      if (packs > 3 || got < wantG * 0.5 || got > wantG * 2) continue;
+      candidates.push(r);
+      qtys[r.barcode] = packs;
+      factors[r.barcode] = Math.round((wantG / got) * 1000) / 1000;
+    }
+  }
   const out: ResolvedItem = { ...item, qty, weighted, candidates, preferred, reference };
   if (Object.keys(qtys).length) out.qtys = qtys;
   if (Object.keys(factors).length) out.factors = factors;
@@ -565,6 +609,11 @@ export function packSize(p: Product | undefined): string | null {
   return label[u] ? `${+p.quantity.toFixed(2)} ${label[u]}` : null;
 }
 
+/** Whether a basket line is bought by weight: by its product, as deli and packs can mix. */
+export function lineWeighed(l: Line, weighted: Set<string>, products: Map<string, Product>): boolean {
+  return products.get(l.barcode)?.is_weighted ?? weighted.has(l.key);
+}
+
 /** How much to put in the cart, in words: "2 יח'" or "500 גרם". */
 export function howMuch(l: Line, weighted: boolean): string {
   return weighted ? fmtKg(l.qty) : `${+l.qty.toFixed(2)} יח'`;
@@ -604,7 +653,7 @@ export function shoppingText(
 ): string {
   const rows = lines.map((l) => {
     const p = products.get(l.barcode);
-    const bits = [`☐ ${howMuch(l, weighted.has(l.key))} · ${l.name}`];
+    const bits = [`☐ ${howMuch(l, lineWeighed(l, weighted, products))} · ${l.name}`];
     const size = packSize(p);
     const m = maker(p);
     if (m) bits.push(m);
@@ -640,11 +689,19 @@ export type LineAmount =
   | { mode: "kg"; kg: number; step: number; canUnits: boolean }
   | { mode: "unit"; count: number; approxKg: number | null; canKg: boolean };
 
-/** How a list line is bought, for the editor: by weight (kg) or a number of units. */
-export function lineAmount(line: string): LineAmount | null {
+/**
+ * How a list line is bought, for the editor: by weight (kg) or a number of units.
+ * `kind` is what the shelves say about terms the built-in hints don't know.
+ */
+export function lineAmount(line: string, kind?: TermKind): LineAmount | null {
   const it = parseList(line)[0];
   if (!it) return null;
-  const hint = weighedHint(it.key);
+  let hint = weighedHint(it.key);
+  if (hint === null && kind === "either" && !it.weightKg) {
+    // packaged by default, a weight can be asked for
+    return { mode: "unit", count: it.qty, approxKg: null, canKg: true };
+  }
+  if (hint === null && kind && kind !== "pack") hint = defaultKg(it.key);
   const step = hint === null ? 0.25 : hint >= 1 ? 0.5 : hint >= 0.5 ? 0.25 : 0.1;
   if (it.weightKg) return { mode: "kg", kg: Math.round(it.weightKg * it.qty * 1000) / 1000, step, canUnits: hint !== null };
   if (hint !== null && !it.counted && !it.volumeL) return { mode: "kg", kg: hint, step, canUnits: true };

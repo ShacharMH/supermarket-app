@@ -5,8 +5,9 @@ import ShoppingList from "./ShoppingList";
 import ListEditor, { rememberTerms } from "./ListEditor";
 import CompareTable from "./CompareTable";
 import { errorText } from "../lib/errors";
+import { saveKinds } from "../lib/termKinds";
 import {
-  bestSplits, maker, normName, parseList, rankStores, resolveItem,
+  bestSplits, maker, normName, parseList, rankStores, resolveItem, weighedHint,
   type BranchRow, type BuyMode, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
@@ -230,6 +231,8 @@ export default function ListPage() {
   }
 
   function setTerm(term: string, patch: { mode?: BuyMode; weight_kg?: number }) {
+    // the list row follows: "במשקל" shows grams, "ארוז" units (with the switch kept)
+    if (patch.mode && weighedHint(term) === null) saveKinds({ [term]: patch.mode === "weight" ? "weight" : "either" });
     return recalc(`"${term}" עודכן`, async () => {
       await supabase.from("term_settings").upsert({ term, ...patch, updated_at: new Date().toISOString() });
       // a product picked for the other buying mode no longer applies

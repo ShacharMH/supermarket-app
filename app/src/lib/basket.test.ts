@@ -347,3 +347,45 @@ describe("editor amounts", () => {
     expect(lineAmount(setLineUnits("עגבניות", 1))).toMatchObject({ mode: "unit", count: 1 });
   });
 });
+
+describe("deli items the built-in hints don't know", () => {
+  const deli = (barcode: string, name: string): Product => ({ ...prod(barcode, null, null), name, is_weighted: true });
+  const pack = (barcode: string, name: string, g: number): Product => ({ ...prod(barcode, g, "גרם"), name });
+  const gouda = [deli("w1", "גאודה עיזים"), deli("w2", "גאודה עיזים 30%"), pack("p1", "משולש גאודה עיזים 160 גרם", 160), pack("p2", "גאודה עיזים 1 ק\"ג", 1000)];
+
+  it("reads the shelves into a kind", async () => {
+    const { termKind } = await import("./basket");
+    expect(termKind({ weighed_start: 19, packed_start: 3, weighed_all: 27, packed_all: 7 })).toBe("weight");
+    expect(termKind({ weighed_start: 66, packed_start: 147, weighed_all: 75, packed_all: 445 })).toBe("either");
+    expect(termKind({ weighed_start: 0, packed_start: 9, weighed_all: 0, packed_all: 13 })).toBe("pack");
+  });
+
+  it("shows grams in the list editor, 200g by default in 100g steps", async () => {
+    const { lineAmount } = await import("./basket");
+    expect(lineAmount("גאודה עיזים", "weight")).toEqual({ mode: "kg", kg: 0.2, step: 0.1, canUnits: true });
+    expect(lineAmount("גאודה עיזים")).toMatchObject({ mode: "unit", canKg: false });
+    expect(lineAmount("זיתי קלמטה", "either")).toEqual({ mode: "unit", count: 1, approxKg: null, canKg: true });
+    expect(lineAmount("זיתי קלמטה 300 גרם", "either")).toMatchObject({ mode: "kg", kg: 0.3 });
+    expect(lineAmount("קוטג", "pack")).toMatchObject({ mode: "unit", canKg: false });
+  });
+
+  it("prices 200g from the deli and lets a close pack compete per gram", () => {
+    const r = resolveItem({ key: "גאודה עיזים", qty: 1 }, gouda, [], new Map());
+    expect(r.weighted).toBe(true);
+    expect(r.qty).toBe(0.2);
+    expect(r.candidates.map((c) => c.barcode).sort()).toEqual(["p1", "w1", "w2"]); // not the 1kg block
+    expect(r.qtys).toEqual({ p1: 1 });
+    expect(r.factors).toEqual({ p1: 1.25 });
+  });
+
+  it("keeps to the deli once the user chose by weight", () => {
+    const r = resolveItem({ key: "גאודה עיזים", qty: 1 }, gouda, [], new Map(), { mode: "weight" });
+    expect(r.candidates.every((c) => c.is_weighted)).toBe(true);
+  });
+
+  it("whole packages when units are asked for", () => {
+    const r = resolveItem({ key: "גאודה עיזים", qty: 2, counted: true }, gouda, [], new Map());
+    expect(r.weighted).toBe(false);
+    expect(r.qty).toBe(2);
+  });
+});

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { groupByCategory } from "../lib/categories";
-import { howMuch, maker, packSize, promoHint, shelfBarcode, type Line, type Product } from "../lib/basket";
+import { howMuch, lineWeighed, maker, packSize, promoHint, shelfBarcode, type Line, type Product } from "../lib/basket";
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
 
@@ -59,7 +59,7 @@ export default function ShopMode({
 
   const row = (l: Line) => {
     const p = products.get(l.barcode);
-    const isW = weighted.has(l.key);
+    const isW = lineWeighed(l, weighted, products);
     const code = shelfBarcode(l.barcode);
     const hint = promoHint(l);
     const meta = [maker(p), packSize(p), code && `ברקוד ${code}`].filter(Boolean).join(" · ");
