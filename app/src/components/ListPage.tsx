@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import { loadSettings } from "../settings";
 import ShoppingList from "./ShoppingList";
+import ListEditor, { rememberTerms } from "./ListEditor";
+import CompareTable from "./CompareTable";
 import { errorText } from "../lib/errors";
 import {
   bestSplits, maker, normName, parseList, rankStores, resolveItem,
@@ -103,6 +105,7 @@ export default function ListPage() {
     const settings = loadSettings();
     const items = parseList(text);
     if (items.length === 0) return;
+    rememberTerms(items.map((i) => i.key));
     setBusy(true);
     setError(null);
     try {
@@ -241,8 +244,7 @@ export default function ListPage() {
 
   return (
     <div className="page">
-      <label className="lbl" htmlFor="list">רשימת קניות (שורה לכל מוצר, אפשר "2 קוטג")</label>
-      <textarea id="list" rows={8} value={text} onChange={(e) => onText(e.target.value)} placeholder={"2 קוטג\nחלב 3%\nלחם אחיד\nביצים L"} />
+      <ListEditor text={text} onChange={onText} />
       <button className="primary" disabled={busy || !text.trim()} onClick={compare}>
         {busy ? "מחשב..." : "איפה הכי זול?"}
       </button>
@@ -295,6 +297,10 @@ export default function ListPage() {
             </section>
           ) : (
             <p className="note">לא נמצאו מחירים. בדקו שיש אזור בהגדרות ושהאיסוף הלילי רץ.</p>
+          )}
+
+          {best && result.stores.length > 1 && (
+            <CompareTable stores={result.stores} keys={result.items.map((i) => i.key)} weighted={weighted} />
           )}
 
           <section className="card">

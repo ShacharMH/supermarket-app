@@ -179,3 +179,40 @@ li.done .sm-name { text-decoration: line-through; }
 .matches li > span { min-width: 0; overflow-wrap: anywhere; }
 .not-this { white-space: nowrap; color: var(--warn); font-size: 0.85rem; }
 .matches li.in-basket { font-weight: 600; }
+
+/* --- list editor --- */
+.editor { display: flex; flex-direction: column; gap: 8px; }
+.editor-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.editor-title { font-size: 1.1rem; margin: 0; }
+.add-box { position: relative; display: flex; gap: 8px; }
+.add-box input { flex: 1; font-size: 1rem; padding: 12px 14px; border-radius: 12px; }
+.add-btn { flex: 0 0 auto; }
+.suggest { position: absolute; top: calc(100% + 4px); inset-inline: 0; z-index: 5; list-style: none; margin: 0; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); max-height: 320px; overflow-y: auto; }
+.suggest button { width: 100%; text-align: start; border: none; background: none; padding: 10px; border-radius: 8px; }
+.suggest button:hover, .suggest button:focus-visible { background: var(--chip); }
+.list-rows { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.list-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.list-row:last-child { border-bottom: none; }
+.row-icon { font-size: 1.3rem; width: 28px; text-align: center; flex: 0 0 auto; }
+.row-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex: 0 0 auto; }
+.stepper button { border: none; border-radius: 0; background: var(--field); width: 36px; height: 34px; padding: 0; font-size: 1.1rem; }
+.stepper .qty { min-width: 28px; text-align: center; font-weight: 700; }
+.empty-list { padding: 12px; text-align: center; }
+
+/* --- departments --- */
+.dept-head { font-weight: 700; font-size: 0.85rem; color: var(--muted); padding: 10px 0 2px; border-bottom: 1px solid var(--line); }
+.sm-dept { font-weight: 800; color: var(--muted); padding: 10px 4px 0; font-size: 0.95rem; }
+
+/* --- comparison table --- */
+.sec-toggle { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; background: none; border: none; padding: 0; text-align: start; color: inherit; }
+.sec-toggle h3 { margin: 0; }
+.cmp-wrap { overflow-x: auto; }
+.cmp { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.cmp th, .cmp td { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
+.cmp thead th { font-size: 0.8rem; }
+.cmp-branch { display: block; color: var(--muted); font-weight: 400; font-size: 0.75rem; }
+.cmp td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cmp td.cmp-min { color: var(--ok); font-weight: 800; }
+.cmp-best { color: var(--accent); }
+.cmp tfoot th, .cmp tfoot td { border-bottom: none; font-weight: 800; }

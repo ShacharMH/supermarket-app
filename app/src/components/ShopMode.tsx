@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { groupByCategory } from "../lib/categories";
 import { howMuch, maker, packSize, promoHint, shelfBarcode, type Line, type Product } from "../lib/basket";
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
@@ -94,7 +95,12 @@ export default function ShopMode({
         <div style={{ width: `${lines.length ? (done.length / lines.length) * 100 : 0}%` }} />
       </div>
       <ul className="sm-list">
-        {todo.map(row)}
+        {groupByCategory(todo, (l) => l.key).map(({ cat, items }) => [
+          <li key={`h-${cat.id}`} className="sm-dept">
+            <span aria-hidden>{cat.icon}</span> {cat.label}
+          </li>,
+          ...items.map(row),
+        ])}
         {done.length > 0 && <li className="sm-sep">בעגלה</li>}
         {done.map(row)}
       </ul>

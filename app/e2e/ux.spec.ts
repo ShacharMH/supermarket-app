@@ -117,6 +117,7 @@ test("the list is saved even when the app is closed right after typing", async (
     return listHandler(r, url, body);
   });
   await page.goto("./");
+  await page.getByRole("button", { name: /עריכה כטקסט/ }).click();
   await page.locator("textarea").fill("קוטג\nביצים");
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
   await expect.poll(() => saved.length, { timeout: 500 }).toBeGreaterThan(0); // well before the 800ms debounce

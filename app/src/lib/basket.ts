@@ -596,3 +596,19 @@ export function shoppingText(
   const total = lines.reduce((s, l) => s + l.total, 0);
   return [`🛒 ${title}`, ...rows, `סה"כ משוער: ₪${total.toFixed(2)}`].join("\n");
 }
+
+// ---------------------------------------------------------------- list editing
+
+/** Change how many of a list line to buy, keeping the rest of what was written. */
+export function setLineQty(line: string, qty: number): string {
+  let rest = line.trim();
+  const counted = rest.match(COUNT_RE);
+  if (counted) {
+    // "ביצים 2 חבילות" keeps its unit word
+    return qty > 0 ? rest.replace(COUNT_RE, `${qty} ${counted[2]}`) : rest;
+  }
+  const parsed = parseList(rest)[0];
+  if (parsed?.raw) rest = rest.replace(/^\d+(?:\.\d+)?\s*(?:x|×|\*)?\s+/i, "");
+  else rest = rest.replace(/\s*(?:x|×|\*)\s*\d+(?:\.\d+)?$/i, "");
+  return qty > 1 ? `${qty} ${rest}` : rest;
+}

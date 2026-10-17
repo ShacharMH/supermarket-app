@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { howMuch, maker, packSize, promoHint, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
 import ShopMode from "./ShopMode";
+import { groupByCategory } from "../lib/categories";
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
 
@@ -57,8 +58,11 @@ export default function ShoppingList({
 
   return (
     <div className="shop">
+      {groupByCategory(lines, (l) => l.key).map(({ cat, items }) => (
+      <div key={cat.id} className="dept">
+      <div className="dept-head"><span aria-hidden>{cat.icon}</span> {cat.label}</div>
       <ul className="shoplist">
-        {lines.map((l) => {
+        {items.map((l) => {
           const p = products.get(l.barcode);
           const isW = weighted.has(l.key);
           const size = packSize(p);
@@ -98,6 +102,8 @@ export default function ShoppingList({
           );
         })}
       </ul>
+      </div>
+      ))}
       <button className="primary shop-go" onClick={() => setShopping(true)}>🛒 מצב קנייה בסופר</button>
       {shopping && (
         <ShopMode

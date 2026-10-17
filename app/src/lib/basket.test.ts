@@ -308,3 +308,17 @@ describe("plain produce, not pickles or premium", () => {
     expect(heStem(normName("עגבניות"))).toBe(heStem(normName("עגבנייה")));
   });
 });
+
+describe("setLineQty", () => {
+  it("changes the count and keeps the rest", async () => {
+    const { setLineQty } = await import("./basket");
+    expect(setLineQty("קוטג", 2)).toBe("2 קוטג");
+    expect(setLineQty("2 קוטג", 3)).toBe("3 קוטג");
+    expect(setLineQty("3 קוטג", 1)).toBe("קוטג");
+    expect(setLineQty("לחם x3", 4)).toBe("4 לחם");
+    expect(setLineQty("ביצים 2 חבילות", 3)).toBe("ביצים 3 חבילות");
+    expect(setLineQty("בשר טחון 500 גרם", 2)).toBe("2 בשר טחון 500 גרם");
+    expect(setLineQty("נקה 7", 2)).toBe("2 נקה 7");
+    expect(setLineQty("3 ב-1 שמפו", 2)).toBe("2 3 ב-1 שמפו");
+  });
+});
