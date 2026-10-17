@@ -174,3 +174,7 @@ li.done .sm-name { text-decoration: line-through; }
 .sm-main .tag { margin-inline-start: 0; align-self: flex-start; font-size: 0.85rem; }
 .sm-price { font-weight: 700; white-space: nowrap; }
 .sm-finish { display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 24px 16px; font-size: 1.3rem; font-weight: 700; }
+.matches ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
+.matches li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 0.9rem; }
+.matches li > span { min-width: 0; overflow-wrap: anywhere; }
+.not-this { white-space: nowrap; color: var(--warn); font-size: 0.85rem; }

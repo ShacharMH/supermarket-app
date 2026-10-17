@@ -85,7 +85,7 @@ export default function ShoppingList({
                   <span className="sl-tags">
                     <span className="muted small">עבור "{l.key}"</span>
                     {l.promo && <span className="tag promo">מבצע: {l.promo}</span>}
-                    {!l.preferred && <span className="tag alt">חלופה זולה</span>}
+                    {!l.preferred && <span className="tag alt">תחליף</span>}
                   </span>
                   {(() => {
                     const h = promoHint(l);

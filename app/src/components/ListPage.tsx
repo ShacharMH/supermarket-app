@@ -4,13 +4,14 @@ import { loadSettings } from "../settings";
 import ShoppingList from "./ShoppingList";
 import { errorText } from "../lib/errors";
 import {
-  bestSplits, maker, parseList, rankStores, resolveItem,
+  bestSplits, maker, normName, parseList, rankStores, resolveItem,
   type BranchRow, type BuyMode, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
 type Result = {
   strict: Set<string>;
   pinned: Set<string>; // terms with a product the user picked (vs. inferred from receipts)
+  excluded: Map<string, string[]>; // term -> product names marked "not this"
   items: ResolvedItem[];
   results: Map<string, Product[]>;
   stores: StoreOption[];
@@ -108,10 +109,13 @@ export default function ListPage() {
         supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
-        supabase.from("term_settings").select("term, mode, weight_kg"),
+        supabase.from("term_settings").select("term, mode, weight_kg, excluded"),
       ]);
-      const termOpts = new Map<string, { mode?: BuyMode; weightKg?: number }>(
-        (termSettings.data ?? []).map((t) => [t.term, { mode: t.mode ?? undefined, weightKg: t.weight_kg ?? undefined }]),
+      const termOpts = new Map<string, { mode?: BuyMode; weightKg?: number; excluded?: string[] }>(
+        (termSettings.data ?? []).map((t) => [
+          t.term,
+          { mode: t.mode ?? undefined, weightKg: t.weight_kg ?? undefined, excluded: t.excluded ?? [] },
+        ]),
       );
       const pinned = new Map<string, string[]>();
       const strict = new Set<string>();
@@ -184,7 +188,10 @@ export default function ListPage() {
       const keys = resolved.map((r) => r.key);
       const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee });
       const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
-      setResult({ items: resolved, results, stores, splits, strict, pinned: new Set(pinned.keys()) });
+      setResult({
+        items: resolved, results, stores, splits, strict, pinned: new Set(pinned.keys()),
+        excluded: new Map([...termOpts].map(([k, v]) => [k, v.excluded ?? []])),
+      });
       return stores[0];
     } catch (e) {
       setError(errorText(e));
@@ -209,6 +216,12 @@ export default function ListPage() {
     return recalc(`הבחירה עבור "${term}" נשמרה`, async () => {
       await supabase.from("product_preferences").delete().eq("term", term);
       if (barcode) await supabase.from("product_preferences").insert({ term, barcode, strict });
+    });
+  }
+
+  function setExcluded(term: string, names: string[], label: string) {
+    return recalc(label, async () => {
+      await supabase.from("term_settings").upsert({ term, excluded: names, updated_at: new Date().toISOString() });
     });
   }
 
@@ -367,6 +380,39 @@ export default function ListPage() {
                             </option>
                           ))}
                         </select>
+                        {(() => {
+                          // the distinct products that count as this item, cheapest first
+                          const seen = new Map<string, Product>();
+                          for (const c of [...it.candidates].sort((a, b) => a.min_price - b.min_price))
+                            if (!seen.has(normName(c.name))) seen.set(normName(c.name), c);
+                          const ex = result.excluded.get(it.key) ?? [];
+                          return (
+                            <div className="matches">
+                              <div className="muted small">נחשבים "{it.key}" ({seen.size}):</div>
+                              <ul>
+                                {[...seen].slice(0, 12).map(([n, c]) => (
+                                  <li key={n}>
+                                    <span>
+                                      {c.name} <span className="muted small">מ-{money(c.min_price)}{c.is_weighted ? ' לק"ג' : ""}</span>
+                                    </span>
+                                    <button
+                                      className="link not-this"
+                                      aria-label={`לא מתאים: ${c.name}`}
+                                      onClick={() => setExcluded(it.key, [...ex, n], `"${c.name}" לא ייחשב יותר "${it.key}"`)}
+                                    >
+                                      ✕ לא מתאים
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                              {ex.length > 0 && (
+                                <button className="link" onClick={() => setExcluded(it.key, [], `ההסרות עבור "${it.key}" בוטלו`)}>
+                                  החזרת {ex.length} מוצרים שהוסרו
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {pinned && (
                           <label className="strict">
                             <input

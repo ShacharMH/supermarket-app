@@ -96,7 +96,7 @@ test("weighed items show weight and per-kg price", async ({ page }) => {
 
 test("guesses by-weight for butcher items and lets the user switch", async ({ page }) => {
   const meat = { ...PRODUCT, barcode: "c:1", name: "בשר בקר טחון טרי", is_weighted: true, quantity: 1, unit_of_measure: "קילוגרם" };
-  const frozen = { ...PRODUCT, barcode: "7290000000099", name: "בשר טחון קפוא 500 גרם", quantity: 500 };
+  const frozen = { ...PRODUCT, barcode: "7290000000099", name: "בשר טחון 500 גרם במגש", quantity: 500 };
   let saved: Record<string, unknown> | null = null;
   const payloads: string[] = [];
   await mockSupabase(page, (r, url, body) => {
@@ -227,6 +227,32 @@ test("in-store mode: big list, tick items, progress, finish", async ({ page }) =
   await dlg.getByRole("button", { name: /סיום/ }).click();
   await expect(dlg).toHaveCount(0);
   await expect(page.locator(".best .shoplist input:checked")).toHaveCount(0);
+});
+
+test("'not this' removes a product from an item and recalculates", async ({ page }) => {
+  const pickle = { ...PRODUCT, barcode: "p:1", name: "מלפפון בחומץ", is_weighted: true, quantity: 1, unit_of_measure: "קילוגרם", min_price: 30 };
+  const magi = { ...PRODUCT, barcode: "m:1", name: "מלפפון בייבי", is_weighted: true, quantity: 1, unit_of_measure: "קילוגרם", min_price: 9 };
+  const plain = { ...PRODUCT, barcode: "c:1", name: "מלפפון", is_weighted: true, quantity: 1, unit_of_measure: "קילוגרם", min_price: 4.9 };
+  let saved: Record<string, unknown> | null = null;
+  const payloads: string[] = [];
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: [] });
+    if (url.includes("rpc/search_weighed")) return r.fulfill({ json: [pickle, magi, plain] });
+    if (url.includes("term_settings") && r.request().method() === "POST") saved = JSON.parse(body);
+    if (url.includes("term_settings") && r.request().method() === "GET") return r.fulfill({ json: saved ? [saved] : [] });
+    if (url.includes("rpc/price_basket")) payloads.push(body);
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "מלפפונים" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect.poll(() => payloads.length).toBe(1);
+  expect(JSON.parse(payloads[0]).items[0].candidates).toEqual(["m:1", "c:1"]); // pickles left out
+  await page.getByRole("button", { name: "שינוי" }).click();
+  await page.getByRole("button", { name: "לא מתאים: מלפפון בייבי" }).click();
+  await expect(page.locator(".toast")).toContainText("לא ייחשב יותר");
+  expect(saved).toMatchObject({ term: "מלפפונים", excluded: ["מלפפונ בייבי"] });
+  expect(JSON.parse(payloads[1]).items[0].candidates).toEqual(["c:1"]);
 });
 
 test("empty data explains what to do", async ({ page }) => {

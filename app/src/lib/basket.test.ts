@@ -179,7 +179,7 @@ describe("shopping list", () => {
         "🛒 רמי לוי · רמלה",
         "☐ 2 יח' · קוטג 5% · תנובה · 250 גרם - ₪10.00 (מבצע: 2 ב-10)",
         "☐ 500 גרם · בשר בקר טחון - ₪32.45",
-        "☐ 1 יח' · חלב טרה - ₪7.00 (חלופה)",
+        "☐ 1 יח' · חלב טרה - ₪7.00 (תחליף)",
         'סה"כ משוער: ₪49.45',
       ].join("\n"),
     );
@@ -275,10 +275,36 @@ describe("picking a weighed product applies to every chain", () => {
   it("prefers the same kind in all chains, not just the picked code", () => {
     const r = resolveItem({ key: "בשר טחון", qty: 1 }, meats, ["ramilevy"], new Map());
     expect(r.preferred).toEqual(["ramilevy", "other:9", "bakar2"]);
-    expect(r.candidates.map((c) => c.barcode)).toContain("frozen"); // still allowed, with the penalty
+    expect(r.candidates.map((c) => c.barcode)).toContain("mahfud"); // other kinds still allowed, with the penalty
+    expect(r.candidates.map((c) => c.barcode)).not.toContain("frozen"); // frozen only when asked for
   });
   it("'only this product' means only that kind", () => {
     const r = resolveItem({ key: "בשר טחון", qty: 1 }, meats, ["ramilevy"], new Map(), { strict: true });
     expect(r.candidates.map((c) => c.barcode)).toEqual(["ramilevy", "other:9", "bakar2"]);
+  });
+});
+
+describe("plain produce, not pickles or premium", () => {
+  const w = (barcode: string, name: string, price = 5): Product => ({ ...prod(barcode, 1, "קילוגרם"), is_weighted: true, name, min_price: price });
+  it("skips pickled, organic and cherry unless asked", () => {
+    const cukes = [w("pickle", "מלפפונים במלח/חומץ במשקל", 35), w("veg", "מלפפון/ירקות במשקל", 35), w("plain", "מלפפון", 4.9), w("org", "מלפפון אורגני", 16.9)];
+    expect(resolveItem({ key: "מלפפונים", qty: 1 }, cukes, [], new Map()).candidates.map((c) => c.barcode)).toEqual(["plain"]);
+    expect(resolveItem({ key: "מלפפונים במלח", qty: 1 }, cukes, [], new Map()).candidates.map((c) => c.barcode)).toContain("pickle");
+    const toms = [w("cheryorg", "עגבנית שרי אורגנית", 36.9), w("magi", "עגבניות מגי", 9.9), w("plain", "עגבניה", 3.5), w("gouda", "גאודה עגבניות וזיתים", 138)];
+    expect(resolveItem({ key: "עגבניות", qty: 1 }, toms, [], new Map()).candidates.map((c) => c.barcode)).toEqual(["magi", "plain"]);
+    expect(resolveItem({ key: "עגבניות שרי", qty: 1 }, toms, [], new Map()).candidates.map((c) => c.barcode)).toContain("cheryorg");
+  });
+  it("keeps special products when nothing else matches", () => {
+    expect(resolveItem({ key: "מלפפונים", qty: 1 }, [w("pickle", "מלפפונים במלח")], [], new Map()).candidates).toHaveLength(1);
+  });
+  it("drops what the user marked 'not this' (by name, in every chain)", () => {
+    const toms = [w("a:1", "עגבניות מגי"), w("b:2", "עגבניות מגי"), w("plain", "עגבניה")];
+    const r = resolveItem({ key: "עגבניות", qty: 1 }, toms, [], new Map(), { excluded: ["עגבניות מגי"] });
+    expect(r.candidates.map((c) => c.barcode)).toEqual(["plain"]);
+  });
+  it("normalises like the database", async () => {
+    const { normName, heStem } = await import("./basket");
+    expect(heStem(normName("מלפפונים"))).toBe(heStem(normName("מלפפון")));
+    expect(heStem(normName("עגבניות"))).toBe(heStem(normName("עגבנייה")));
   });
 });

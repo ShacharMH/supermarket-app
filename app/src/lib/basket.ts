@@ -267,12 +267,38 @@ export function weighedHint(term: string): number | null {
   return null;
 }
 
-const normName = (s: string) => s.replace(/["'`׳״]/g, "").toLowerCase().trim();
+// same normalisation as the database: no quotes, final letters as regular letters
+export const normName = (s: string) =>
+  s.replace(/["'`׳״]/g, "").toLowerCase().replace(/[ךםןףץ]/g, (c) => "כמנפצ"["ךםןףץ".indexOf(c)]).replace(/\s+/g, " ").trim();
+
+/** Hebrew stem for matching words: מלפפונים -> מלפפונ, עגבניות -> עגבנ (as he_stem in SQL). */
+export function heStem(w: string): string {
+  if (w.length < 5 || !/^[א-ת]+$/.test(w)) return w;
+  return w.replace(/(ימ|ות|יה|ה)$/, "").replace(/י$/, "");
+}
+
+// Processed, premium or "contains it" products: never chosen for a plain term like
+// "מלפפונים" or "עגבניות" unless the line asks for them ("מלפפונים חמוצים").
+const SPECIAL_WORDS = [
+  "אורגני", "שרי", "מרוסק", "כבוש", "חמוצ", "חמוצים", "במלח", "בחומצ", "חומצ", "משומר", "שימורימ", "קפוא", "מקפוא",
+  "מיובש", "רסק", "ממרח", "סלט", "ברוטב", "רוטב", "גאודה", "גבינ", "זיתימ", "ירקות", "מארז", "פרימיומ", "קלוי",
+  "מטוגנ", "מבושל", "מעושנ", "ממולא", "צלוי", "טחינ", "ממתק", "סוכריות",
+].map((w) => normName(w));
+
+function isSpecialFor(name: string, term: string): boolean {
+  const termStems = normName(term).split(" ").map(heStem);
+  // the line already asks for something special ("מלפפונים במלח") - don't second-guess it
+  if (termStems.some((t) => SPECIAL_WORDS.some((sw) => t.startsWith(heStem(sw))))) return false;
+  return normName(name)
+    .split(/[\s/,\-()]+/)
+    .some((w) => SPECIAL_WORDS.some((sw) => w.startsWith(heStem(sw))) && !termStems.some((t) => w.startsWith(t)));
+}
 
 export type ResolveOptions = {
   strict?: boolean; // pinned product only, no substitutes
   mode?: BuyMode; // the user's explicit choice for this term
   weightKg?: number; // the user's saved amount for this term
+  excluded?: string[]; // normalised product names the user marked "not this"
 };
 
 /**
@@ -288,6 +314,11 @@ export function resolveItem(
   bought: Map<string, number>,
   opts: ResolveOptions = {},
 ): ResolvedItem {
+  // what the user ruled out, then processed/premium variants unless asked for (or all that's left)
+  const excluded = new Set(opts.excluded ?? []);
+  results = results.filter((r) => pinned.includes(r.barcode) || !excluded.has(normName(r.name)));
+  const plain = results.filter((r) => pinned.includes(r.barcode) || !isSpecialFor(r.name, item.key));
+  if (plain.length) results = plain;
   if (results.length === 0) return { ...item, weighted: false, candidates: [], preferred: [], reference: null };
   const weighed = results.filter((r) => r.is_weighted);
   const packed = results.filter((r) => !r.is_weighted);
@@ -559,7 +590,7 @@ export function shoppingText(
     if (size) bits.push(size);
     let row = bits.join(" · ") + ` - ₪${l.total.toFixed(2)}`;
     if (l.promo) row += ` (מבצע: ${l.promo})`;
-    if (!l.preferred) row += " (חלופה)";
+    if (!l.preferred) row += " (תחליף)";
     return row;
   });
   const total = lines.reduce((s, l) => s + l.total, 0);
