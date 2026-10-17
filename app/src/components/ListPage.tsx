@@ -45,6 +45,7 @@ export default function ListPage() {
   // a toast pinned above the tab bar, visible wherever the user has scrolled to
   const [editing, setEditing] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ text: string; done: boolean } | null>(null);
   const noticeTimer = useRef<number | undefined>(undefined);
   const saveTimer = useRef<number | undefined>(undefined);
@@ -327,7 +328,14 @@ export default function ListPage() {
                             <>
                               <span className="chip">{it.weighted ? `⚖️ ${kgLabel(it.qty)}` : `📦 ${+it.qty.toFixed(2)} יח'`}</span>
                               <span className="muted">
-                                {chosen ? (pinned ? `${chosen.name}${result.strict.has(it.key) ? " בלבד" : ""}` : `כמו בקבלות: ${chosen.name}`) : "הכי זול מבין הדומים"}
+                                {chosen
+                                  ? pinned
+                                    ? `${chosen.name}${result.strict.has(it.key) ? " בלבד" : ""}`
+                                    : `כמו בקבלות: ${chosen.name}`
+                                  : (() => {
+                                      const l = best?.branch.lines.find((x) => x.key === it.key);
+                                      return l ? `הכי זול מבין הדומים · בסל: ${l.name}` : "הכי זול מבין הדומים";
+                                    })()}
                               </span>
                             </>
                           )}
@@ -381,19 +389,33 @@ export default function ListPage() {
                           ))}
                         </select>
                         {(() => {
-                          // the distinct products that count as this item, cheapest first
+                          // the distinct products that count as this item: the ones in the
+                          // recommended basket first, then cheapest first
+                          const inBasket = new Set(
+                            (best?.branch.lines ?? []).filter((l) => l.key === it.key).map((l) => normName(l.name)),
+                          );
+                          for (const l of best?.branch.lines ?? [])
+                            if (l.key === it.key) {
+                              const c = it.candidates.find((x) => x.barcode === l.barcode);
+                              if (c) inBasket.add(normName(c.name));
+                            }
                           const seen = new Map<string, Product>();
                           for (const c of [...it.candidates].sort((a, b) => a.min_price - b.min_price))
                             if (!seen.has(normName(c.name))) seen.set(normName(c.name), c);
+                          const all = [...seen].sort(([a], [b]) => Number(inBasket.has(b)) - Number(inBasket.has(a)));
+                          const showAllMatches = expanded.has(it.key);
+                          const shown = showAllMatches ? all : all.slice(0, 8);
                           const ex = result.excluded.get(it.key) ?? [];
                           return (
                             <div className="matches">
-                              <div className="muted small">נחשבים "{it.key}" ({seen.size}):</div>
+                              <div className="muted small">נחשבים "{it.key}" ({all.length}):</div>
                               <ul>
-                                {[...seen].slice(0, 12).map(([n, c]) => (
-                                  <li key={n}>
+                                {shown.map(([n, c]) => (
+                                  <li key={n} className={inBasket.has(n) ? "in-basket" : ""}>
                                     <span>
-                                      {c.name} <span className="muted small">מ-{money(c.min_price)}{c.is_weighted ? ' לק"ג' : ""}</span>
+                                      {c.name}{" "}
+                                      {inBasket.has(n) && <span className="tag promo">בסל המומלץ</span>}{" "}
+                                      <span className="muted small">מ-{money(c.min_price)}{c.is_weighted ? ' לק"ג' : ""}</span>
                                     </span>
                                     <button
                                       className="link not-this"
@@ -405,6 +427,19 @@ export default function ListPage() {
                                   </li>
                                 ))}
                               </ul>
+                              {all.length > shown.length || showAllMatches ? (
+                                <button
+                                  className="link"
+                                  onClick={() => {
+                                    const next = new Set(expanded);
+                                    if (showAllMatches) next.delete(it.key);
+                                    else next.add(it.key);
+                                    setExpanded(next);
+                                  }}
+                                >
+                                  {showAllMatches ? "פחות" : `הצגת כל ${all.length}`}
+                                </button>
+                              ) : null}
                               {ex.length > 0 && (
                                 <button className="link" onClick={() => setExcluded(it.key, [], `ההסרות עבור "${it.key}" בוטלו`)}>
                                   החזרת {ex.length} מוצרים שהוסרו

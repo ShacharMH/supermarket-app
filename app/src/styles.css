@@ -178,3 +178,4 @@ li.done .sm-name { text-decoration: line-through; }
 .matches li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 0.9rem; }
 .matches li > span { min-width: 0; overflow-wrap: anywhere; }
 .not-this { white-space: nowrap; color: var(--warn); font-size: 0.85rem; }
+.matches li.in-basket { font-weight: 600; }

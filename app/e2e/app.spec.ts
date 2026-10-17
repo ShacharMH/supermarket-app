@@ -255,6 +255,27 @@ test("'not this' removes a product from an item and recalculates", async ({ page
   expect(JSON.parse(payloads[1]).items[0].candidates).toEqual(["c:1"]);
 });
 
+test("the product in the recommended basket is always listed among the matches", async ({ page }) => {
+  const lettuces = Array.from({ length: 14 }, (_, i) => ({ ...PRODUCT, barcode: `l${i}`, name: `חסה סוג ${i}`, min_price: 3 + i, quantity: null }));
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: lettuces });
+    if (url.includes("rpc/price_basket"))
+      return r.fulfill({ json: [{ ...ROWS[0], lines: [{ key: "חסה", qty: 1, barcode: "l13", name: "חסה סוג 13", price: 7.9, total: 7.9, promo: null, promo_min_qty: null, preferred: true }] }] });
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "חסה" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  const item = page.locator(".item", { hasText: "חסה" });
+  await expect(item).toContainText("בסל: חסה סוג 13");
+  await item.getByRole("button", { name: "שינוי" }).click();
+  await expect(item.locator(".matches li").first()).toContainText("חסה סוג 13");
+  await expect(item.locator(".matches li").first()).toContainText("בסל המומלץ");
+  await expect(item.locator(".matches li")).toHaveCount(8);
+  await item.getByRole("button", { name: "הצגת כל 14" }).click();
+  await expect(item.locator(".matches li")).toHaveCount(14);
+});
+
 test("empty data explains what to do", async ({ page }) => {
   await mockSupabase(page, (r, url) => {
     if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "חלב" } }] });
