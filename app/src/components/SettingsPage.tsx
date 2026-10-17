@@ -35,7 +35,7 @@ export default function SettingsPage() {
     if (error) setMsg(errorText(error));
     else {
       setCity("");
-      setMsg("נוסף. הסניפים באזור ייכנסו למעקב בריצת האיסוף הבאה.");
+      setMsg("נוסף. מחירים לסניפים חדשים באזור ייאספו בריצה הלילית הבאה.");
       load();
     }
   }
@@ -56,6 +56,7 @@ export default function SettingsPage() {
 
   async function removeArea(id: number) {
     await supabase.from("user_areas").delete().eq("id", id);
+    setMsg("האזור הוסר. סניפים שמחוץ לאזורים שלך כבר לא יופיעו בהשוואה.");
     load();
   }
 
@@ -131,6 +132,10 @@ export default function SettingsPage() {
         <label className="lbl">
           מוצר חלופי ייבחר רק אם הוא זול ביותר מ-{settings.penalty}% מהמועדף
           <input type="range" min={0} max={50} step={5} value={settings.penalty} onChange={(e) => update({ penalty: Number(e.target.value) })} />
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={settings.includeOnline} onChange={(e) => update({ includeOnline: e.target.checked })} />
+          להשוות גם לחנויות אונליין (משלוח עד הבית)
         </label>
         <label className="lbl">
           דמי משלוח לחנויות אונליין (₪)

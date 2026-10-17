@@ -32,7 +32,7 @@ function navUrl(b: BranchRow) {
 }
 
 function storeTitle(b: BranchRow) {
-  return `${b.chain_name} · ${b.branch_name ?? ""}${b.is_online ? " (אונליין)" : ""}`;
+  return b.is_online ? `${b.chain_name} · 🚚 אונליין (משלוח)` : `${b.chain_name} · ${b.branch_name ?? ""}`;
 }
 
 
@@ -188,7 +188,7 @@ export default function ListPage() {
         clubs: (clubs.data ?? []).map((c) => c.chain_id),
       });
       if (error) throw error;
-      const rows = (data ?? []) as BranchRow[];
+      const rows = ((data ?? []) as BranchRow[]).filter((r) => settings.includeOnline || !r.is_online);
       const keys = resolved.map((r) => r.key);
       const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee });
       const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
@@ -505,7 +505,7 @@ export default function ListPage() {
                 <summary>
                   <span className="store-name">
                     {storeTitle(o.branch)}
-                    {o.branch.city && <span className="muted small"> · {o.branch.city}</span>}
+                    {o.branch.city && !o.branch.is_online && <span className="muted small"> · {o.branch.city}</span>}
                   </span>
                   <span className="store-price">
                     {o.missing.length === best.missing.length ? (

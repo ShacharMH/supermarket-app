@@ -328,6 +328,19 @@ test("quick comparison table highlights the cheapest price per item", async ({ p
   await expect(table.locator("tfoot td").first()).toHaveText("₪24.40");
 });
 
+test("online stores can be left out of the comparison", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("basket-settings", JSON.stringify({ includeOnline: false })));
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/price_basket"))
+      return r.fulfill({ json: [...ROWS, { ...ROWS[0], branch_id: 7, chain_name: "שופרסל", is_online: true, lines: ROWS[0].lines.map((l) => ({ ...l, total: 1 })) }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best")).toContainText("רמי לוי");
+  await expect(page.locator("body")).not.toContainText("אונליין");
+});
+
 test("empty data explains what to do", async ({ page }) => {
   await mockSupabase(page, (r, url) => {
     if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "חלב" } }] });

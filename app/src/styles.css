@@ -220,3 +220,4 @@ li.done .sm-name { text-decoration: line-through; }
 .unit-chip { flex: 0 0 auto; padding: 4px 8px; border-radius: 999px; font-size: 0.78rem; background: var(--chip); border: 1px solid var(--line); white-space: nowrap; }
 .unit-label { flex: 0 0 auto; font-size: 0.8rem; color: var(--muted); }
 .stepper .qty.wide { min-width: 62px; font-size: 0.85rem; }
+.check-row { display: flex; gap: 8px; align-items: center; font-size: 0.95rem; }
