@@ -8,6 +8,7 @@ export type ListItem = {
   volumeL?: number;
   byWeight?: boolean;
   raw?: string; // the line before a leading count was taken off ("7 אפ"), to retry as a name
+  counted?: boolean; // the line gives a number of units ("3 עגבניות", "ביצים 2 חבילות")
 };
 
 // Words that say "from the counter, sold by weight" - they never appear in product names.
@@ -149,6 +150,7 @@ export function parseList(text: string): ListItem[] {
     if (volumeL) item.volumeL = volumeL;
     if (byWeight) item.byWeight = true;
     if (lead) item.raw = beforeCount;
+    if (lead || trail || counted) item.counted = true;
     out.push(item);
   }
   // merge duplicates
@@ -260,6 +262,21 @@ const WEIGHED_HINTS: [RegExp, number][] = [
   // nuts & bulk
   [/(אגוז|שקדים|קשיו|פיסטוק|בוטנים|גרעינים|פיצוחים|צימוקים|פירות יבשים|תמרים)/, 0.2],
 ];
+
+// Rough weight of one piece of produce (kg), for "3 עגבניות" when sold by weight.
+const UNIT_WEIGHTS: [RegExp, number][] = [
+  [/^(עגבני|מלפפו|בצל|אפרסק|נקטרינ|בננ)/, 0.15], [/^(פלפל|תפוח|אגס|קישוא|אבוקדו)/, 0.2], [/^גזר/, 0.1],
+  [/^(בטטה|תפוז|רימו)/, 0.3], [/^(חציל|מנגו)/, 0.35], [/^(לימו)/, 0.12], [/^(קלמנטינ|מנדרינ)/, 0.1],
+  [/^(שזיף|משמש)/, 0.07], [/^קיווי/, 0.08], [/^(כרובית|ברוקולי)/, 0.7], [/^כרוב/, 1], [/^מלון/, 1.5],
+  [/^אבטיח/, 5], [/^(דלעת|דלורית)/, 1.5],
+];
+
+/** Approximate kg per piece, or null when unknown. */
+export function unitWeight(term: string): number | null {
+  const t = term.trim();
+  for (const [re, kg] of UNIT_WEIGHTS) if (re.test(t)) return kg;
+  return null;
+}
 
 export function weighedHint(term: string): number | null {
   const t = term.replace(/[׳']/g, "'").trim();
@@ -388,7 +405,11 @@ export function resolveItem(
     }
   }
   // weighed goods: qty is kilograms; packaged goods: qty is a count
-  const kgEach = item.weightKg ?? opts.weightKg ?? hintKg ?? 1;
+  // "3 עגבניות" is three tomatoes (~150g each); "בשר טחון" alone is the usual amount
+  const kgEach =
+    item.weightKg ??
+    (item.counted ? unitWeight(item.key) : null) ??
+    opts.weightKg ?? hintKg ?? 1;
   const qty = weighted ? Math.round(kgEach * item.qty * 1000) / 1000 : item.qty;
   const out: ResolvedItem = { ...item, qty, weighted, candidates, preferred, reference };
   if (Object.keys(qtys).length) out.qtys = qtys;
@@ -611,4 +632,40 @@ export function setLineQty(line: string, qty: number): string {
   if (parsed?.raw) rest = rest.replace(/^\d+(?:\.\d+)?\s*(?:x|×|\*)?\s+/i, "");
   else rest = rest.replace(/\s*(?:x|×|\*)\s*\d+(?:\.\d+)?$/i, "");
   return qty > 1 ? `${qty} ${rest}` : rest;
+}
+
+const fmtWeight = (kg: number) => (kg < 1 ? `${Math.round(kg * 1000)} גרם` : `${+kg.toFixed(2)} ק"ג`);
+
+export type LineAmount =
+  | { mode: "kg"; kg: number; step: number; canUnits: boolean }
+  | { mode: "unit"; count: number; approxKg: number | null; canKg: boolean };
+
+/** How a list line is bought, for the editor: by weight (kg) or a number of units. */
+export function lineAmount(line: string): LineAmount | null {
+  const it = parseList(line)[0];
+  if (!it) return null;
+  const hint = weighedHint(it.key);
+  const step = hint === null ? 0.25 : hint >= 1 ? 0.5 : hint >= 0.5 ? 0.25 : 0.1;
+  if (it.weightKg) return { mode: "kg", kg: Math.round(it.weightKg * it.qty * 1000) / 1000, step, canUnits: hint !== null };
+  if (hint !== null && !it.counted && !it.volumeL) return { mode: "kg", kg: hint, step, canUnits: true };
+  const per = hint !== null ? unitWeight(it.key) : null;
+  return { mode: "unit", count: it.qty, approxKg: per ? Math.round(per * it.qty * 1000) / 1000 : null, canKg: hint !== null };
+}
+
+/** The line text without amounts: "3 עגבניות", "עגבניות 2 ק\"ג" -> "עגבניות". */
+function lineName(line: string): string {
+  let rest = line.replace(WEIGHT_RE, " ").replace(COUNT_RE, " ").replace(/\s+/g, " ").trim();
+  rest = rest.replace(/\s*(?:x|×|\*)\s*\d+(?:\.\d+)?$/i, "");
+  if (parseList(rest)[0]?.raw) rest = rest.replace(/^\d+(?:\.\d+)?\s*(?:x|×|\*)?\s+/i, "");
+  return rest.trim();
+}
+
+/** Set a by-weight amount: "עגבניות" -> "עגבניות 1.5 ק\"ג". */
+export function setLineWeight(line: string, kg: number): string {
+  return `${lineName(line)} ${fmtWeight(Math.round(kg * 1000) / 1000)}`;
+}
+
+/** Set a number of pieces explicitly: "עגבניות 3 יח'" (so it isn't read as the default weight). */
+export function setLineUnits(line: string, count: number): string {
+  return `${lineName(line)} ${count} יח'`;
 }

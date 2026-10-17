@@ -13,9 +13,9 @@ const branch = (id: number, lines: ReturnType<typeof line>[], online = false): B
 describe("parseList", () => {
   it("parses quantities without eating product attributes", () => {
     expect(parseList("2 קוטג\nחלב 3%\nלחם x3\n- ביצים\nחלב 3%")).toEqual([
-      { key: "קוטג", qty: 2, raw: "2 קוטג" },
+      { key: "קוטג", qty: 2, raw: "2 קוטג", counted: true },
       { key: "חלב 3%", qty: 2 },
-      { key: "לחם", qty: 3 },
+      { key: "לחם", qty: 3, counted: true },
       { key: "ביצים", qty: 1 },
     ]);
   });
@@ -232,13 +232,13 @@ describe("pack size from the product name", () => {
 describe("quantities and sizes", () => {
   it("counts with units, and numbers that are part of a name", () => {
     expect(parseList("ביצים 2 חבילות\nקולה 6 בקבוקים\nנקה 7\n3 ב-1 שמפו\nבמבה 80\n5 קוטג\n7 אפ")).toEqual([
-      { key: "ביצים", qty: 2 },
-      { key: "קולה", qty: 6 },
+      { key: "ביצים", qty: 2, counted: true },
+      { key: "קולה", qty: 6, counted: true },
       { key: "נקה 7", qty: 1 },
       { key: "3 ב-1 שמפו", qty: 1 },
       { key: "במבה 80", qty: 1 },
-      { key: "קוטג", qty: 5, raw: "5 קוטג" },
-      { key: "אפ", qty: 7, raw: "7 אפ" },
+      { key: "קוטג", qty: 5, raw: "5 קוטג", counted: true },
+      { key: "אפ", qty: 7, raw: "7 אפ", counted: true },
     ]);
   });
   it("buys enough packs to reach the requested size", () => {
@@ -320,5 +320,30 @@ describe("setLineQty", () => {
     expect(setLineQty("בשר טחון 500 גרם", 2)).toBe("2 בשר טחון 500 גרם");
     expect(setLineQty("נקה 7", 2)).toBe("2 נקה 7");
     expect(setLineQty("3 ב-1 שמפו", 2)).toBe("2 3 ב-1 שמפו");
+  });
+});
+
+describe("produce by the piece", () => {
+  it("'3 עגבניות' is about 450g, plain 'עגבניות' is 1kg", () => {
+    const w: Product = { ...prod("t", 1, "קילוגרם"), is_weighted: true, name: "עגבניה" };
+    expect(resolveItem(parseList("3 עגבניות")[0], [w], [], new Map()).qty).toBe(0.45);
+    expect(resolveItem(parseList("עגבניות")[0], [w], [], new Map()).qty).toBe(1);
+    expect(resolveItem(parseList("עגבניות 2 ק\"ג")[0], [w], [], new Map()).qty).toBe(2);
+  });
+});
+
+describe("editor amounts", () => {
+  it("knows weight vs units and converts between them", async () => {
+    const { lineAmount, setLineWeight, setLineUnits } = await import("./basket");
+    expect(lineAmount("עגבניות")).toEqual({ mode: "kg", kg: 1, step: 0.5, canUnits: true });
+    expect(lineAmount("בשר טחון")).toEqual({ mode: "kg", kg: 0.5, step: 0.25, canUnits: true });
+    expect(lineAmount("קוטג")).toEqual({ mode: "unit", count: 1, approxKg: null, canKg: false });
+    expect(lineAmount("עגבניות 3 יח'")).toEqual({ mode: "unit", count: 3, approxKg: 0.45, canKg: true });
+    expect(setLineWeight("עגבניות", 1.5)).toBe('עגבניות 1.5 ק"ג');
+    expect(setLineWeight('עגבניות 1.5 ק"ג', 0.5)).toBe("עגבניות 500 גרם");
+    expect(setLineWeight("3 עגבניות", 1)).toBe('עגבניות 1 ק"ג');
+    expect(setLineUnits('עגבניות 1.5 ק"ג', 4)).toBe("עגבניות 4 יח'");
+    expect(lineAmount(setLineWeight("בשר טחון", 0.75))).toMatchObject({ mode: "kg", kg: 0.75 });
+    expect(lineAmount(setLineUnits("עגבניות", 1))).toMatchObject({ mode: "unit", count: 1 });
   });
 });

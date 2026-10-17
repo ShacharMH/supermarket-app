@@ -296,13 +296,21 @@ test("list editor: add with suggestions, change quantity, remove, edit as text",
   await add.press("Enter");
   await expect(page.locator(".list-row").nth(2)).toContainText("עגבניות");
   await expect(page.locator(".list-row").nth(2).locator(".row-icon")).toHaveText("🥬");
+  // produce is bought by weight: 1 ק"ג by default, +/- in half kilos
+  const tomatoes = page.locator(".list-row").nth(2);
+  await expect(tomatoes.locator(".qty")).toHaveText('1 ק"ג');
   await page.getByRole("button", { name: "עוד עגבניות" }).click();
-  await expect(page.locator(".list-row").nth(2).locator(".qty")).toHaveText("2");
+  await expect(tomatoes.locator(".qty")).toHaveText('1.5 ק"ג');
+  // ...or switch to pieces
+  await page.getByRole("button", { name: "לקנות עגבניות ביחידות" }).click();
+  await expect(tomatoes.locator(".qty")).toHaveText("10");
+  await expect(tomatoes).toContainText("≈1.5 ק\"ג");
   await page.getByRole("button", { name: "פחות חלב" }).click(); // qty 1 -> removes
   await expect(page.locator(".list-row")).toHaveCount(2);
+  await expect(page.locator(".list-row").first()).toContainText("יח'");
   await page.getByRole("button", { name: /עריכה כטקסט/ }).click();
-  await expect(page.locator("textarea")).toHaveValue("קוטג' 5% תנובה\n2 עגבניות");
-  await expect.poll(() => saved.at(-1) ?? "").toContain("2 עגבניות");
+  await expect(page.locator("textarea")).toHaveValue("קוטג' 5% תנובה\nעגבניות 10 יח'");
+  await expect.poll(() => saved.at(-1) ?? "").toContain("עגבניות 10 יח'");
 });
 
 test("quick comparison table highlights the cheapest price per item", async ({ page }) => {

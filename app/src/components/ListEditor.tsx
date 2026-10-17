@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabase";
-import { parseList, setLineQty } from "../lib/basket";
+import { lineAmount, parseList, setLineQty, setLineUnits, setLineWeight, unitWeight } from "../lib/basket";
 import { categoryOf } from "../lib/categories";
 
 const RECENT_KEY = "recent-terms";
@@ -114,27 +114,53 @@ export default function ListEditor({ text, onChange }: { text: string; onChange:
         <ul className="list-rows">
           {lines.map((line, i) => {
             const it = parseList(line)[0];
-            if (!it) return null;
+            const amt = lineAmount(line);
+            if (!it || !amt) return null;
             const cat = categoryOf(it.key);
-            const amount = it.weightKg ? kgLabel(it.weightKg) : it.volumeL ? `${it.volumeL} ל'` : null;
+            const update = (l: string) => setLines(lines.map((x, j) => (j === i ? l : x)));
+            const remove = () => setLines(lines.filter((_, j) => j !== i));
             return (
               <li key={`${i}-${line}`} className="list-row">
                 <span className="row-icon" aria-hidden>{cat.icon}</span>
                 <span className="row-name">
                   {it.key}
-                  {amount && <span className="muted small"> · {amount}</span>}
+                  {it.volumeL && <span className="muted small"> · {it.volumeL} ל'</span>}
+                  {amt.mode === "unit" && amt.approxKg && <span className="muted small"> · ≈{kgLabel(amt.approxKg)}</span>}
                 </span>
-                <span className="stepper" role="group" aria-label={`כמות ${it.key}`}>
-                  <button
-                    aria-label={`פחות ${it.key}`}
-                    onClick={() => (it.qty <= 1 ? setLines(lines.filter((_, j) => j !== i)) : setLines(lines.map((l, j) => (j === i ? setLineQty(l, it.qty - 1) : l))))}
-                  >
-                    {it.qty <= 1 ? "🗑" : "−"}
-                  </button>
-                  <span className="qty">{it.qty}</span>
-                  <button aria-label={`עוד ${it.key}`} onClick={() => setLines(lines.map((l, j) => (j === i ? setLineQty(l, it.qty + 1) : l)))}>
-                    +
-                  </button>
+                <span className="row-ctl">
+                {amt.mode === "kg" ? (
+                  <>
+                    <button className="unit-chip" aria-label={`לקנות ${it.key} ביחידות`} onClick={() => update(setLineUnits(line, Math.max(1, Math.round(amt.kg / (unitWeight(it.key) ?? amt.kg)))))}>
+                      ⚖️ ק"ג
+                    </button>
+                    <span className="stepper" role="group" aria-label={`כמות ${it.key}`}>
+                      <button aria-label={`פחות ${it.key}`} onClick={() => (amt.kg - amt.step < amt.step / 2 ? remove() : update(setLineWeight(line, amt.kg - amt.step)))}>
+                        {amt.kg - amt.step < amt.step / 2 ? "🗑" : "−"}
+                      </button>
+                      <span className="qty wide">{kgLabel(amt.kg)}</span>
+                      <button aria-label={`עוד ${it.key}`} onClick={() => update(setLineWeight(line, amt.kg + amt.step))}>+</button>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {amt.canKg ? (
+                      <button className="unit-chip" aria-label={`לקנות ${it.key} במשקל`} onClick={() => update(setLineWeight(line, amt.approxKg && amt.approxKg >= 0.25 ? Math.round(amt.approxKg * 4) / 4 : 1))}>
+                        🔢 יח'
+                      </button>
+                    ) : (
+                      <span className="unit-label">יח'</span>
+                    )}
+                    <span className="stepper" role="group" aria-label={`כמות ${it.key}`}>
+                      <button aria-label={`פחות ${it.key}`} onClick={() => (amt.count <= 1 ? remove() : update(amt.canKg ? setLineUnits(line, amt.count - 1) : setLineQty(line, amt.count - 1)))}>
+                        {amt.count <= 1 ? "🗑" : "−"}
+                      </button>
+                      <span className="qty">{amt.count}</span>
+                      <button aria-label={`עוד ${it.key}`} onClick={() => update(amt.canKg ? setLineUnits(line, amt.count + 1) : setLineQty(line, amt.count + 1))}>
+                        +
+                      </button>
+                    </span>
+                  </>
+                )}
                 </span>
               </li>
             );
