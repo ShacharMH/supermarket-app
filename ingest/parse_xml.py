@@ -154,14 +154,20 @@ def parse_prices(path: str) -> tuple[dict, list[dict]]:
             continue
         # ItemType is unreliable across chains, so decide by the code itself.
         barcode = norm_barcode(raw, meta.get("chainid"))
+        weighted = f.get("bisweighted", "0") in ("1", "true")
+        if weighted and ":" not in barcode:
+            # weighed goods use chain-internal codes even when they look like a real
+            # barcode (7290000046181 is grapes in one chain, Emek cheese in another)
+            barcode = f"{meta.get('chainid') or 'x'}:{barcode}"
         items.append(
             {
                 "barcode": barcode,
+                "plain_code": norm_barcode(raw, meta.get("chainid")),
                 "name": _first(f, "itemname", "itemnm", "manufactureritemdescription") or barcode,
                 "manufacturer": _known(_first(f, "manufacturername", "manufacturename")),
                 "quantity": _num(f.get("quantity")),
                 "unit_of_measure": _first(f, "unitqty", "unitofmeasure"),
-                "is_weighted": f.get("bisweighted", "0") in ("1", "true"),
+                "is_weighted": weighted,
                 "price": round(price, 2),
                 "unit_price": _num(_first(f, "unitofmeasureprice")),
             }

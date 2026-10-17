@@ -456,6 +456,11 @@ def ingest_prices(conn, tracked_rows) -> None:
                         log(f"  store {store_id}: no price file found")
                     if promo_files:
                         _meta, promos = parse_promos(promo_files[0])
+                        if price_files:
+                            # promotions refer to weighed items by their plain code
+                            scoped = {it["plain_code"]: it["barcode"] for it in items if it["is_weighted"]}
+                            for pm in promos:
+                                pm["barcodes"] = sorted({scoped.get(b, b) for b in pm["barcodes"]})
                         load_promos(conn, bid, chain_id, promos)
                         log(f"  store {store_id}: {len(promos)} promotions")
                 except Exception as e:  # noqa: BLE001 - one bad file must not stop the run
