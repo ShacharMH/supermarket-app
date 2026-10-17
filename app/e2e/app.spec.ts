@@ -379,3 +379,22 @@ test("receipts: template download and CSV preview", async ({ page }) => {
   await expect(page.locator(".tbl.preview tbody tr")).toHaveCount(2);
   await expect(page.getByRole("button", { name: /שמירת קבלה \(2 פריטים\)/ })).toBeEnabled();
 });
+
+test("list editor: a late search reply doesn't reopen suggestions after adding", async ({ page }) => {
+  await mockSupabase(page, async (r, url, body) => {
+    if (url.includes("rpc/search_products")) {
+      await new Promise((res) => setTimeout(res, 600)); // slower than typing on
+      return r.fulfill({ json: [{ ...PRODUCT, name: `${JSON.parse(body).term} ירוקים` }] });
+    }
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  const add = page.getByRole("textbox", { name: "הוספת מוצר" });
+  await add.pressSequentially("ענב", { delay: 50 });
+  await page.waitForTimeout(300); // the "ענב" search is now in flight
+  await add.pressSequentially("ים", { delay: 50 });
+  await add.press("Enter");
+  await expect(page.locator(".list-row").last()).toContainText("ענבים");
+  await page.waitForTimeout(1200); // both replies have arrived
+  await expect(page.getByRole("listbox", { name: "הצעות" })).toHaveCount(0);
+});

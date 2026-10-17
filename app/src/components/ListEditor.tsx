@@ -57,12 +57,18 @@ export default function ListEditor({ text, onChange }: { text: string; onChange:
     const inList = new Set(lines.map((l) => parseList(l)[0]?.key));
     const recent = loadRecent().filter((t) => t.includes(q) && !inList.has(t)).slice(0, 4);
     setSuggestions(recent);
+    // a reply for an older draft (e.g. "ענב" after "ענבים" was already added) is dropped
+    let stale = false;
     timer.current = window.setTimeout(async () => {
       const { data } = await supabase.rpc("search_products", { term: q, max_results: 8 });
+      if (stale) return;
       const names = ((data ?? []) as { name: string }[]).map((p) => p.name);
       setSuggestions([...new Set([...recent, ...names])].slice(0, 8));
     }, 250);
-    return () => window.clearTimeout(timer.current);
+    return () => {
+      stale = true;
+      window.clearTimeout(timer.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft]);
 
@@ -90,13 +96,17 @@ export default function ListEditor({ text, onChange }: { text: string; onChange:
           placeholder="➕ הוספת מוצר (למשל: קוטג, עגבניות, 2 חלב)"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && add(draft)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add(draft);
+            else if (e.key === "Escape") setSuggestions([]);
+          }}
+          onBlur={() => window.setTimeout(() => setSuggestions([]), 200)}
           enterKeyHint="done"
         />
         {draft.trim() && (
           <button className="primary add-btn" onClick={() => add(draft)} aria-label="הוספה">הוספה</button>
         )}
-        {suggestions.length > 0 && (
+        {draft.trim().length >= 2 && suggestions.length > 0 && (
           <ul className="suggest" role="listbox" aria-label="הצעות">
             {suggestions.map((s) => (
               <li key={s}>
