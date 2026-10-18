@@ -31,8 +31,28 @@ def haversine_km(lat1, lon1, lat2, lon2) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+# Nominatim answers with the town itself when it can't find the street
+_AREA_TYPES = {"city", "town", "village", "municipality", "county", "state", "region", "country",
+               "suburb", "quarter", "neighbourhood", "city_district", "district", "hamlet", "isolated_dwelling"}
+
+
+def geocode_exact(query: str | None = None, **structured: str) -> tuple[float, float] | None:
+    """A street- or place-level point, or None if only the town (or nothing) was found."""
+    hits = _search({"q": query} if query else structured)
+    if not hits or hits[0].get("addresstype") in _AREA_TYPES:
+        return None
+    return float(hits[0]["lat"]), float(hits[0]["lon"])
+
+
 def geocode(query: str) -> tuple[float, float] | None:
     """Geocode a free-text Israeli address. Respects Nominatim's 1 req/sec policy."""
+    hits = _search({"q": query})
+    if not hits:
+        return None
+    return float(hits[0]["lat"]), float(hits[0]["lon"])
+
+
+def _search(params: dict) -> list[dict]:
     global _last_call
     wait = 1.1 - (time.time() - _last_call)
     if wait > 0:
@@ -41,18 +61,15 @@ def geocode(query: str) -> tuple[float, float] | None:
     try:
         r = requests.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": query, "format": "json", "limit": 1, "countrycodes": "il", "accept-language": "he"},
+            params={**params, "format": "jsonv2", "limit": 1, "countrycodes": "il", "accept-language": "he"},
             headers={"User-Agent": USER_AGENT},
             timeout=20,
         )
         r.raise_for_status()
-        hits = r.json()
+        return r.json()
     except Exception as e:  # noqa: BLE001
-        print(f"  geocode failed for {query!r}: {e}")
-        return None
-    if not hits:
-        return None
-    return float(hits[0]["lat"]), float(hits[0]["lon"])
+        print(f"  geocode failed for {params!r}: {e}")
+        return []
 
 
 def load_city_codes() -> dict[str, str]:

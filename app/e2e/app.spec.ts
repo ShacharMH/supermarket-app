@@ -427,3 +427,22 @@ test("deli items the app doesn't know come in grams; a pack can win per gram", a
   expect(item.qty).toBe(0.2);
   expect(item.candidates.sort()).toEqual(["7290000000777", "a:1"]);
 });
+
+test("equal prices: the store nearer home comes first, with its distance", async ({ page }) => {
+  const lines = ROWS[0].lines;
+  const far = { ...ROWS[0], branch_id: 1, chain_name: "אושר עד", branch_name: "תלפיות", city: "ירושלים", lat: 31.75, lon: 35.21 };
+  const near = { ...ROWS[0], branch_id: 2, chain_name: "רמי לוי", branch_name: "מישור אדומים", city: "מעלה אדומים", lat: 31.802, lon: 35.253, lines };
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/price_basket")) return r.fulfill({ json: [far, near] });
+    if (url.includes("user_profile")) return r.fulfill({ json: { home_lat: 31.8, home_lon: 35.25 } });
+    if (url.includes("geo_exact")) return r.fulfill({ json: [{ id: 2 }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best h2")).toContainText("רמי לוי");
+  await expect(page.locator(".best .nav-link")).toContainText('0.4 ק"מ');
+  const other = page.locator(".stores details").first();
+  await expect(other).toContainText("אותו מחיר");
+  await expect(other).toContainText('≈'); // Talpiot is placed by its town only
+});

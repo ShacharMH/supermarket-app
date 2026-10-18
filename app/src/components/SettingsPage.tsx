@@ -5,6 +5,7 @@ import { loadSettings, saveSettings, type Settings } from "../settings";
 
 type Area = { id: number; label: string; city: string | null; lat: number | null; lon: number | null; radius_km: number };
 type Chain = { chain_id: string; name: string };
+type Home = { home_lat: number | null; home_lon: number | null; home_label: string | null };
 
 export default function SettingsPage() {
   const [areas, setAreas] = useState<Area[]>([]);
@@ -14,13 +15,17 @@ export default function SettingsPage() {
   const [radius, setRadius] = useState(5);
   const [settings, setSettings] = useState<Settings>(loadSettings());
   const [msg, setMsg] = useState<string | null>(null);
+  const [home, setHome] = useState<Home | null>(null);
+  const [homeMsg, setHomeMsg] = useState<string | null>(null);
 
   async function load() {
-    const [a, c, u] = await Promise.all([
+    const [a, c, u, h] = await Promise.all([
       supabase.from("user_areas").select("id, label, city, lat, lon, radius_km").order("id"),
       supabase.from("chains").select("chain_id, name").order("name"),
       supabase.from("user_clubs").select("chain_id"),
+      supabase.from("user_profile").select("home_lat, home_lon, home_label").maybeSingle(),
     ]);
+    setHome((h.data as Home | null) ?? null);
     setAreas((a.data ?? []) as Area[]);
     setChains((c.data ?? []) as Chain[]);
     setClubs(new Set((u.data ?? []).map((x) => x.chain_id)));
@@ -52,6 +57,28 @@ export default function SettingsPage() {
       },
       (e) => setMsg(e.message),
     );
+  }
+
+  function setHomeHere() {
+    if (!navigator.geolocation) return setHomeMsg("הדפדפן לא תומך במיקום");
+    setHomeMsg("מאתר מיקום...");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { error } = await supabase.from("user_profile").upsert({
+          home_lat: pos.coords.latitude, home_lon: pos.coords.longitude, home_label: "המיקום שנשמר", updated_at: new Date().toISOString(),
+        });
+        setHomeMsg(error ? errorText(error) : "נשמר. בין סניפים באותו מחיר, הקרוב לבית יופיע ראשון.");
+        load();
+      },
+      (e) => setHomeMsg(e.message),
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  }
+
+  async function clearHome() {
+    await supabase.from("user_profile").update({ home_lat: null, home_lon: null, home_label: null }).not("user_id", "is", null);
+    setHomeMsg("הבית הוסר. המרחקים יחושבו ממרכז האזור הראשון.");
+    load();
   }
 
   async function removeArea(id: number) {
@@ -111,6 +138,23 @@ export default function SettingsPage() {
           <button onClick={addHere}>📍 המיקום הנוכחי</button>
         </div>
         {msg && <p className="note">{msg}</p>}
+      </section>
+
+      <section className="card">
+        <h3>הבית שלי</h3>
+        <p className="muted small">
+          ממנו מחושב המרחק לכל סניף, וכשיש כמה סניפים באותו מחיר, הקרוב מופיע ראשון. נשמר רק בחשבון שלך.
+        </p>
+        {home?.home_lat != null ? (
+          <div className="row">
+            <span>🏠 מיקום הבית נשמר</span>
+            <button className="link" onClick={clearHome}>הסרה</button>
+          </div>
+        ) : (
+          <p className="muted small">לא הוגדר. בינתיים המרחק נמדד ממרכז האזור הראשון ברשימה.</p>
+        )}
+        <button onClick={setHomeHere}>🏠 המיקום הנוכחי שלי הוא הבית</button>
+        {homeMsg && <p className="note">{homeMsg}</p>}
       </section>
 
       <section className="card">

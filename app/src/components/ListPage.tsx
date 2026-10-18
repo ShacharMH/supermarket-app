@@ -8,7 +8,7 @@ import { errorText } from "../lib/errors";
 import { saveKinds } from "../lib/termKinds";
 import {
   bestSplits, maker, normName, parseList, rankStores, resolveItem, weighedHint,
-  type BranchRow, type BuyMode, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
+  type BranchRow, type BuyMode, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
 type Result = {
@@ -27,9 +27,17 @@ const kgLabel = (q: number) => (q < 1 ? `${Math.round(q * 1000)} גרם` : `${+q
 
 function navUrl(b: BranchRow) {
   const q = [b.address, b.city].filter(Boolean).join(", ");
-  return b.lat && b.lon
+  // a town-centre point would navigate to the wrong place: search the address instead
+  return b.geo_exact && b.lat && b.lon
     ? `https://www.google.com/maps/search/?api=1&query=${b.lat},${b.lon}`
     : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.chain_name} ${q}`)}`;
+}
+
+/** "2.1 ק\"מ" from home; "≈" when the store is only placed by its town. */
+function distLabel(o: StoreOption): string | null {
+  if (o.distanceKm == null) return null;
+  const km = o.distanceKm < 10 ? o.distanceKm.toFixed(1) : Math.round(o.distanceKm).toString();
+  return `${o.branch.geo_exact ? "" : "≈"}${km} ק"מ`;
 }
 
 function storeTitle(b: BranchRow) {
@@ -110,12 +118,21 @@ export default function ListPage() {
     setBusy(true);
     setError(null);
     try {
-      const [prefs, history, clubs, termSettings] = await Promise.all([
+      const [prefs, history, clubs, termSettings, profile, areas, located] = await Promise.all([
         supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
         supabase.from("term_settings").select("term, mode, weight_kg, excluded"),
+        supabase.from("user_profile").select("home_lat, home_lon").maybeSingle(),
+        supabase.from("user_areas").select("lat, lon").not("lat", "is", null).order("id").limit(1),
+        supabase.from("branches").select("id").eq("tracked", true).eq("geo_exact", true),
       ]);
+      // distances are from home, or else from the centre of the first area
+      const area = areas.data?.[0];
+      const home: Point | null =
+        profile.data?.home_lat != null ? { lat: profile.data.home_lat, lon: profile.data.home_lon }
+        : area ? { lat: area.lat, lon: area.lon } : null;
+      const exact = new Set((located.data ?? []).map((b) => b.id as number));
       const termOpts = new Map<string, { mode?: BuyMode; weightKg?: number; excluded?: string[] }>(
         (termSettings.data ?? []).map((t) => [
           t.term,
@@ -189,10 +206,12 @@ export default function ListPage() {
         clubs: (clubs.data ?? []).map((c) => c.chain_id),
       });
       if (error) throw error;
-      const rows = ((data ?? []) as BranchRow[]).filter((r) => settings.includeOnline || !r.is_online);
+      const rows = ((data ?? []) as BranchRow[])
+        .filter((r) => settings.includeOnline || !r.is_online)
+        .map((r) => ({ ...r, geo_exact: exact.has(r.branch_id) }));
       const keys = resolved.map((r) => r.key);
-      const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee });
-      const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee });
+      const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee, home });
+      const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee, home });
       setResult({
         items: resolved, results, stores, splits, strict, pinned: new Set(pinned.keys()),
         excluded: new Map([...termOpts].map(([k, v]) => [k, v.excluded ?? []])),
@@ -288,7 +307,7 @@ export default function ListPage() {
               {best.missing.length > 0 && <div className="warn">אין כאן: {best.missing.join(", ")}</div>}
               {!best.branch.is_online && (
                 <a className="nav-link" href={navUrl(best.branch)} target="_blank" rel="noreferrer">
-                  📍 {[best.branch.address, best.branch.city].filter(Boolean).join(", ")} · ניווט
+                  📍 {[best.branch.address, best.branch.city, distLabel(best)].filter(Boolean).join(", ")} · ניווט
                 </a>
               )}
               <details className="shop-details" open>
@@ -508,11 +527,13 @@ export default function ListPage() {
                 <summary>
                   <span className="store-name">
                     {storeTitle(o.branch)}
-                    {o.branch.city && !o.branch.is_online && <span className="muted small"> · {o.branch.city}</span>}
+                    {o.branch.city && !o.branch.is_online && (
+                      <span className="muted small"> · {[o.branch.city, distLabel(o)].filter(Boolean).join(" · ")}</span>
+                    )}
                   </span>
                   <span className="store-price">
                     {o.missing.length === best.missing.length ? (
-                      <span className="diff">+{money(o.total - best.total)}</span>
+                      <span className="diff">{o.total - best.total < 0.005 ? "אותו מחיר" : `+${money(o.total - best.total)}`}</span>
                     ) : (
                       <>
                         {money(o.total)} <span className="tag miss">חסרים {o.missing.length}</span>

@@ -61,6 +61,7 @@ export type BranchRow = {
   address: string | null;
   is_online: boolean;
   lat: number | null;
+  geo_exact?: boolean; // the point is the store's street address, not the town centre
   lon: number | null;
   lines: Line[];
 };
@@ -71,6 +72,7 @@ export type StoreOption = {
   estimated: number; // total + estimate for missing items, used for ranking
   missing: string[];
   deliveryFee: number;
+  distanceKm: number | null; // from home; null for online stores or unknown locations
 };
 
 export type SplitOption = {
@@ -481,10 +483,26 @@ export function typicalCosts(rows: BranchRow[]): Map<string, number> {
   return out;
 }
 
+export type Point = { lat: number; lon: number };
+
+/** Straight-line km from home to a store (null for online stores or unknown points). */
+export function distanceKm(home: Point | null | undefined, b: BranchRow): number | null {
+  if (!home || b.is_online || b.lat == null || b.lon == null) return null;
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - home.lat);
+  const dLon = rad(b.lon - home.lon);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(home.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(a));
+}
+
+// same price (to the agora): the nearer store first, stores with no known distance last
+const nearer = (a: number | null, b: number | null) => (a ?? Infinity) - (b ?? Infinity) || 0;
+const samePrice = (a: number, b: number) => Math.abs(a - b) < 0.005;
+
 export function rankStores(
   rows: BranchRow[],
   keys: string[],
-  opts: { deliveryFee: number; missingPenalty?: number },
+  opts: { deliveryFee: number; missingPenalty?: number; home?: Point | null },
 ): StoreOption[] {
   const typical = typicalCosts(rows);
   const penalty = opts.missingPenalty ?? 1.25;
@@ -495,10 +513,12 @@ export function rankStores(
       const deliveryFee = branch.is_online ? opts.deliveryFee : 0;
       const total = sum([...branch.lines.map((l) => l.total), deliveryFee]);
       const estimated = sum([total, ...missing.map((k) => (typical.get(k) ?? 0) * penalty)]);
-      return { branch, total, estimated, missing, deliveryFee };
+      return { branch, total, estimated, missing, deliveryFee, distanceKm: distanceKm(opts.home, branch) };
     })
     .filter((o) => o.branch.lines.length > 0)
-    .sort((a, b) => a.missing.length - b.missing.length || a.estimated - b.estimated);
+    .sort((a, b) =>
+      a.missing.length - b.missing.length ||
+      (samePrice(a.estimated, b.estimated) ? nearer(a.distanceKm, b.distanceKm) : a.estimated - b.estimated));
 }
 
 /** Best two-store splits that beat the best single store by at least `minSaving`. */
@@ -506,7 +526,7 @@ export function bestSplits(
   rows: BranchRow[],
   keys: string[],
   best: StoreOption | undefined,
-  opts: { minSaving: number; maxPairs?: number; deliveryFee: number },
+  opts: { minSaving: number; maxPairs?: number; deliveryFee: number; home?: Point | null },
 ): SplitOption[] {
   if (!best) return [];
   const physical = rows.filter((r) => !r.is_online && r.lines.length > 0);
@@ -534,7 +554,10 @@ export function bestSplits(
       if (saving >= opts.minSaving) out.push({ a, b, linesA, linesB, total, missing, saving });
     }
   }
-  return out.sort((x, y) => y.saving - x.saving).slice(0, opts.maxPairs ?? 3);
+  const trip = (o: SplitOption) => (distanceKm(opts.home, o.a) ?? 0) + (distanceKm(opts.home, o.b) ?? 0);
+  return out
+    .sort((x, y) => (samePrice(x.saving, y.saving) ? trip(x) - trip(y) : y.saving - x.saving))
+    .slice(0, opts.maxPairs ?? 3);
 }
 
 // ---------------------------------------------------------------- receipts CSV

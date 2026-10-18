@@ -389,3 +389,23 @@ describe("deli items the built-in hints don't know", () => {
     expect(r.qty).toBe(2);
   });
 });
+
+describe("equal prices", () => {
+  const at = (id: number, lat: number, lines: ReturnType<typeof line>[]) => ({ ...branch(id, lines), lat, lon: 35.25 });
+  const home = { lat: 31.8, lon: 35.25 };
+
+  it("puts the nearer store first, but never above a cheaper one", () => {
+    const far = at(1, 31.75, [line("גבינה", 10.7)]);
+    const near = at(2, 31.801, [line("גבינה", 10.7)]);
+    const cheapFar = at(3, 31.6, [line("גבינה", 10.6)]);
+    const ranked = rankStores([far, near, cheapFar], ["גבינה"], { deliveryFee: 30, home });
+    expect(ranked.map((o) => o.branch.branch_id)).toEqual([3, 2, 1]);
+    expect(ranked[1].distanceKm).toBeCloseTo(0.11, 1);
+  });
+
+  it("keeps the old order without a home point", () => {
+    const ranked = rankStores([at(1, 31.75, [line("x", 5)]), at(2, 31.8, [line("x", 5)])], ["x"], { deliveryFee: 30 });
+    expect(ranked.map((o) => o.branch.branch_id)).toEqual([1, 2]);
+    expect(ranked[0].distanceKm).toBeNull();
+  });
+});

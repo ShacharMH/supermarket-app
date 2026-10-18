@@ -25,7 +25,7 @@ from il_supermarket_scarper import FileTypesFilters, ScraperFactory
 from il_supermarket_scarper.utils.files.file_output import DiskFileOutput
 
 sys.path.insert(0, os.path.dirname(__file__))
-from geo import geocode, haversine_km, load_city_codes, norm_city  # noqa: E402
+from geo import geocode, geocode_exact, haversine_km, load_city_codes, norm_city  # noqa: E402
 from parse_xml import parse_prices, parse_promos, parse_stores  # noqa: E402
 
 # Extra margin (km) when pre-filtering branches by their city's centre.
@@ -170,6 +170,8 @@ def ingest_stores(conn, chains, city_codes) -> dict[str, str]:
                                     then null else branches.lat end,
                          lon = case when branches.address is distinct from excluded.address
                                     then null else branches.lon end,
+                         geo_exact = case when branches.address is distinct from excluded.address
+                                    then null else branches.geo_exact end,
                          updated_at = now()""",
                     (chain_id, s["sub_chain_id"], s["store_id"], s["name"], s["address"],
                      city.strip() or None, s["zip_code"], s["is_online"]),
@@ -197,6 +199,48 @@ def city_center(conn, city: str) -> tuple[float, float] | None:
         )
     conn.commit()
     return pt
+
+
+def refine_locations(conn) -> None:
+    """Street-level points for tracked stores, so the nearer of two equally cheap
+    stores can be told apart (many were placed at the town's centre). Tries the
+    address, then the store by name; unresolved stores are retried weekly."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """select b.id, c.name, b.name, b.address, b.city from branches b join chains c using (chain_id)
+               where b.tracked and not b.is_online and b.geo_exact is not true
+                 and (b.geo_checked_at is null or b.geo_checked_at < now() - interval '7 days')"""
+        )
+        todo = cur.fetchall()
+    found = 0
+    for bid, chain, name, address, city in todo:
+        center = city_center(conn, city) if city else None
+        street = re.sub(r"\s+\d+[א-ת]?$", "", address or "").strip()  # "הרצל 1" -> "הרצל" as a fallback
+        tries = [
+            {"street": address, "city": city} if address and city else None,
+            {"q": f"{address}, {city}"} if address and city else None,
+            {"street": street, "city": city} if street and street != address and city else None,
+            {"q": f"{chain} {name}, {city}"} if city else None,
+            {"q": f"{name}, {city}"} if city else None,
+        ]
+        pt = None
+        for t in filter(None, tries):
+            q = t.pop("q", None)
+            pt = geocode_exact(q, **t)
+            # a hit in another town of the same name / street is no good
+            if pt and center and haversine_km(*pt, *center) > 10:
+                pt = None
+            if pt:
+                break
+        with conn.cursor() as cur:
+            if pt:
+                found += 1
+                cur.execute("update branches set lat=%s, lon=%s, geo_exact=true, geo_checked_at=now() where id=%s",
+                            (pt[0], pt[1], bid))
+            else:
+                cur.execute("update branches set geo_exact=false, geo_checked_at=now() where id=%s", (bid,))
+        conn.commit()
+    log(f"street-level location for {found}/{len(todo)} tracked stores")
 
 
 def infer_missing_cities(conn) -> None:
@@ -503,6 +547,11 @@ def main() -> None:
                 log("skipping store lists (fresh enough)")
             tracked = select_tracked(conn)
             ingest_prices(conn, tracked)
+            try:
+                refine_locations(conn)
+            except Exception as e:  # noqa: BLE001 - locations are a nicety
+                conn.rollback()
+                log(f"locating stores failed: {e!r}")
         except Exception as e:  # noqa: BLE001
             conn.rollback()
             status, note = "error", repr(e)[:2000]
