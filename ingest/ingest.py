@@ -30,8 +30,8 @@ from parse_xml import parse_prices, parse_promos, parse_stores  # noqa: E402
 
 # Extra margin (km) when pre-filtering branches by their city's centre.
 CITY_MARGIN_KM = 4
-# Keep the database small (Supabase free tier = 500MB): per area keep only the
-# nearest few branches of each chain, and a hard cap per area.
+# Keep the database small (Supabase free tier = 500MB): every store in an area's own
+# town, and around it only the nearest few branches of each chain, up to a cap.
 MAX_PER_CHAIN_PER_AREA = int(os.environ.get("MAX_PER_CHAIN_PER_AREA", "2"))
 MAX_PER_AREA = int(os.environ.get("MAX_PER_AREA", "30"))
 MAX_DB_MB = int(os.environ.get("MAX_DB_MB", "400"))
@@ -350,10 +350,11 @@ def select_tracked(conn) -> list[tuple]:
     for (label, *_rest), cands in zip(resolved, per_area):
         per_chain: dict[str, int] = {}
         kept = 0
-        for _away, _d, chain_id, bid in sorted(cands):
-            if kept >= MAX_PER_AREA:
+        for away, _d, chain_id, bid in sorted(cands):
+            # every store in the area's own town; the cap only thins out the neighbours
+            if away and kept >= MAX_PER_AREA:
                 break
-            if per_chain.get(chain_id, 0) >= MAX_PER_CHAIN_PER_AREA:
+            if away and per_chain.get(chain_id, 0) >= MAX_PER_CHAIN_PER_AREA:
                 continue
             per_chain[chain_id] = per_chain.get(chain_id, 0) + 1
             tracked.add(bid)
