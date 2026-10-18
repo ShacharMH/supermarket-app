@@ -51,7 +51,7 @@ def as_role(cur, role: str, user_id: str | None = None) -> None:
 def check_security(conn, user_id: str | None) -> None:
     with conn.transaction(), conn.cursor() as cur:
         as_role(cur, "anon")
-        for table in ("prices", "products", "branches", "receipts", "user_areas"):
+        for table in ("prices", "products", "branches", "receipts", "user_areas", "term_settings", "user_profile"):
             try:
                 with conn.transaction():
                     cur.execute(f"select count(*) from {table}")
@@ -83,6 +83,9 @@ def check_app_queries(conn, user_id: str | None) -> None:
     with conn.transaction(), conn.cursor() as cur:
         as_role(cur, "authenticated", user_id)
         cur.execute("set local statement_timeout = '8s'")  # same limit the API uses
+        # right after the nightly load the caches are cold; time what users see later
+        for item in COMMON_ITEMS[:3]:
+            cur.execute("select 1 from search_products(%s, 25)", (item,))
         slow = []
         for item in COMMON_ITEMS:
             t = time.monotonic()
@@ -181,6 +184,10 @@ def main() -> int:
         check_data(conn)
         check_security(conn, user_id)
         check_app_queries(conn, user_id)
+        # keep the outcome where it can be read without GitHub access
+        with conn.cursor() as cur:
+            for m in [f"health ❌ {m}" for m in failures] + [f"health ⚠️ {m}" for m in warnings] or ["health ✅ all checks passed"]:
+                cur.execute("insert into ingest_log (msg) values (%s)", (m,))
 
     print(f"\n{len(failures)} failures, {len(warnings)} warnings")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

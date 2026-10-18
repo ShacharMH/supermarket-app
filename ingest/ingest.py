@@ -25,7 +25,7 @@ from il_supermarket_scarper import FileTypesFilters, ScraperFactory
 from il_supermarket_scarper.utils.files.file_output import DiskFileOutput
 
 sys.path.insert(0, os.path.dirname(__file__))
-from geo import geocode, geocode_exact, haversine_km, load_city_codes, norm_city  # noqa: E402
+from geo import geocode, geocode_exact, haversine_km, photon_exact, load_city_codes, norm_city  # noqa: E402
 from parse_xml import parse_prices, parse_promos, parse_stores  # noqa: E402
 
 # Extra margin (km) when pre-filtering branches by their city's centre.
@@ -215,6 +215,8 @@ def refine_locations(conn) -> None:
     found = 0
     for bid, chain, name, address, city in todo:
         center = city_center(conn, city) if city else None
+        if address and address.strip().lower() in ("unknown", "0", "-"):
+            address = None
         street = re.sub(r"\s+\d+[א-ת]?$", "", address or "").strip()  # "הרצל 1" -> "הרצל" as a fallback
         tries = [
             {"street": address, "city": city} if address and city else None,
@@ -223,12 +225,19 @@ def refine_locations(conn) -> None:
             {"q": f"{chain} {name}, {city}"} if city else None,
             {"q": f"{name}, {city}"} if city else None,
         ]
+        if address and city:
+            tries.append({"photon": f"{address}, {city}"})
+        if city:
+            tries.append({"photon": f"{chain} {name} {city}"})
         pt = None
         for t in filter(None, tries):
-            q = t.pop("q", None)
-            pt = geocode_exact(q, **t)
+            if "photon" in t:
+                pt = photon_exact(t["photon"], center)
+            else:
+                q = t.pop("q", None)
+                pt = geocode_exact(q, **t)
             # a hit in another town of the same name / street is no good
-            if pt and center and haversine_km(*pt, *center) > 10:
+            if pt and center and haversine_km(*pt, *center) > 8:
                 pt = None
             if pt:
                 break

@@ -44,6 +44,29 @@ def geocode_exact(query: str | None = None, **structured: str) -> tuple[float, f
     return float(hits[0]["lat"]), float(hits[0]["lon"])
 
 
+def photon_exact(query: str, near: tuple[float, float] | None = None) -> tuple[float, float] | None:
+    """Second opinion from Photon (also OpenStreetMap, but forgiving with spelling)."""
+    global _last_call
+    wait = 1.1 - (time.time() - _last_call)
+    if wait > 0:
+        time.sleep(wait)
+    _last_call = time.time()
+    params: dict = {"q": query, "limit": 1}
+    if near:
+        params.update(lat=near[0], lon=near[1])
+    try:
+        r = requests.get("https://photon.komoot.io/api/", params=params, headers={"User-Agent": USER_AGENT}, timeout=20)
+        r.raise_for_status()
+        feats = r.json().get("features") or []
+    except Exception as e:  # noqa: BLE001
+        print(f"  photon failed for {query!r}: {e}")
+        return None
+    if not feats or feats[0]["properties"].get("type") in _AREA_TYPES | {"locality", "district"}:
+        return None
+    lon, lat = feats[0]["geometry"]["coordinates"]
+    return float(lat), float(lon)
+
+
 def geocode(query: str) -> tuple[float, float] | None:
     """Geocode a free-text Israeli address. Respects Nominatim's 1 req/sec policy."""
     hits = _search({"q": query})
