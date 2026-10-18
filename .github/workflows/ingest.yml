@@ -8,7 +8,10 @@ on:
   schedule:
     # 06:17 UTC = 09:17 Israel in summer, 08:17 in winter: after every chain has
     # published its full daily files (the last, Osher Ad, at 08:00)
-    - cron: "17 6 * * *"
+    - cron: "17 6 * * 0-4,6"
+    # Fridays, for early shopping: 04:17 UTC = 07:17 summer / 06:17 winter - every
+    # chain except Osher Ad (published at 08:00, so yesterday's file is used)
+    - cron: "17 4 * * 5"
   workflow_dispatch:
     inputs:
       chains:
