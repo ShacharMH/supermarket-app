@@ -416,8 +416,7 @@ describe("receipt discount lines", () => {
       "תאריך,מוצר,ברקוד,כמות,מחיר\n18/10/2026,12 ביצי משק טריות,1201589,1,14.24\n18/10/2026,שוק. מריר לינדט 1 90%,3046920029759,2,45.80\n18/10/2026,שוקולד אקסלנט 50-100 גרם,3512,1,-10.80",
     );
     expect(rows).toHaveLength(2);
-    expect(rows[0].reason).toBeUndefined();
-    expect(rows[1]).toMatchObject({ barcode: "3046920029759", qty: 2, price: 45.8, discount: 10.8, promo: "שוקולד אקסלנט 50-100 גרם", reason: "deal" });
+    expect(rows[1]).toMatchObject({ barcode: "3046920029759", qty: 2, price: 45.8, discount: 10.8, promo: "שוקולד אקסלנט 50-100 גרם" });
   });
 });
 

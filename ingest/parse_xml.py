@@ -183,28 +183,41 @@ def parse_promos(path: str) -> tuple[dict, list[dict]]:
     for el, f in _records(path, "promotionid"):
         barcodes = []
         clubs = []
+        item: dict[str, str] = {}  # the deal itself: in today's files it sits on each PromotionItem
         for sub in el.iter():
             key = _local(sub.tag)
             if key == "itemcode" and sub.text and sub.text.strip().strip("0"):
                 barcodes.append(norm_barcode(sub.text, meta.get("chainid")))
+                if not item:
+                    item = _fields(sub.getparent())
             elif key == "clubid" and sub.text:
-                clubs.append(sub.text.strip())
+                # "0", "0 - כלל הלקוחות" (all customers), "2 - מועדון"
+                m = re.match(r"\s*(\d+)", sub.text)
+                clubs.append(m.group(1) if m else sub.text.strip())
         if not barcodes:
             continue
-        rate = _num(f.get("discountrate"))
+        # needs a coupon (or is a compensation voucher): not something a shopper just gets
+        if (f.get("additionaliscoupon") or "").strip() == "1":
+            continue
+        get = lambda k: f.get(k) or item.get(k)  # noqa: E731
+        rate = _num(get("discountrate"))
         if rate is not None and rate > 100:  # some chains send hundredths of a percent
             rate = rate / 100
+        if rate is not None and rate >= 100:  # free item / gift: not a price
+            rate = None
+        start = f.get("promotionstartdate") or f.get("promotionstartdatetime")
+        end = f.get("promotionenddate") or f.get("promotionenddatetime")
         promos.append(
             {
                 "promotion_id": f["promotionid"],
                 "description": f.get("promotiondescription"),
-                "starts_at": _dt(f.get("promotionstartdate"), f.get("promotionstarthour")),
-                "ends_at": _dt(f.get("promotionenddate"), f.get("promotionendhour")),
-                "min_qty": _num(f.get("minqty")),
-                "max_qty": _num(f.get("maxqty")),
-                "discounted_price": _num(f.get("discountedprice")),
+                "starts_at": _dt(start, f.get("promotionstarthour") or _time_of(start)),
+                "ends_at": _dt(end, f.get("promotionendhour") or _time_of(end)),
+                "min_qty": _num(get("minqty")),
+                "max_qty": _num(get("maxqty")),
+                "discounted_price": _num(get("discountedprice")),
                 "discount_rate": rate,
-                "reward_type": int(f["rewardtype"]) if (f.get("rewardtype") or "").isdigit() else None,
+                "reward_type": int(float(get("rewardtype"))) if _num(get("rewardtype")) is not None else None,
                 # ClubId 0 = all customers; anything else = club / card holders only
                 "club_ids": sorted(set(clubs)),
                 "is_club_only": bool(clubs) and "0" not in clubs,
@@ -212,3 +225,10 @@ def parse_promos(path: str) -> tuple[dict, list[dict]]:
             }
         )
     return meta, promos
+
+
+def _time_of(dt: str | None) -> str | None:
+    """"2026-10-16T08:30:00.000" -> "08:30:00"."""
+    if dt and "T" in dt:
+        return dt.split("T", 1)[1][:8]
+    return None

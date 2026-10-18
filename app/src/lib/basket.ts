@@ -581,14 +581,11 @@ export function bestSplits(
 
 // ---------------------------------------------------------------- receipts CSV
 
-/** Why an item was bought: only "preferred" teaches the app what you like. */
-export type BuyReason = "preferred" | "deal" | "substitute";
-
 export type ReceiptRow = {
   date: string | null; store: string | null; name: string; barcode: string | null; qty: number; price: number | null;
   discount?: number; // a discount line printed under the item ("שוקולד אקסלנס 50-100 גרם  -10.80")
   promo?: string;
-  reason?: BuyReason;
+  preferred?: boolean; // starred: "this is the product I want" - only these teach the app
 };
 
 const HEADERS: Record<string, keyof ReceiptRow> = {
@@ -654,7 +651,6 @@ export function parseReceiptCsv(text: string): ReceiptRow[] {
       if (prev) {
         prev.discount = Math.round(((prev.discount ?? 0) - r.price) * 100) / 100;
         prev.promo = prev.promo ? `${prev.promo}; ${r.name}` : r.name;
-        prev.reason = "deal";
       }
       continue;
     }

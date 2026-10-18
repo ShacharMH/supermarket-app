@@ -233,3 +233,5 @@ li.done .sm-name { text-decoration: line-through; }
 .receipt-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .receipt-open { text-align: start; overflow-wrap: anywhere; }
 .receipt-body { margin-top: 8px; }
+.star { background: none; border: 0; padding: 4px 6px; font-size: 1.3em; line-height: 1; color: var(--muted); cursor: pointer; min-width: 36px; min-height: 36px; }
+.star.on { color: inherit; }

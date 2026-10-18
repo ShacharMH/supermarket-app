@@ -1,20 +1,22 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
-import type { BuyReason } from "../lib/basket";
 
 type CheckRow = {
   item_id: number; raw_name: string; barcode: string | null; db_name: string | null; quantity: number;
   paid: number | null; discount: number | null; db_price: number | null; is_weighted: boolean; db_promo: string | null;
-  reason?: BuyReason;
+  preferred?: boolean;
 };
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
 
-export const REASONS: [BuyReason, string][] = [
-  ["preferred", "⭐ זה המוצר שלי"],
-  ["deal", "🏷️ בגלל מבצע"],
-  ["substitute", "🔁 המוצר הרגיל לא היה"],
-];
+/** ☆ / ⭐ - "this is the product I want". */
+export function Star({ on, name, onToggle }: { on: boolean; name: string; onToggle: () => void }) {
+  return (
+    <button className={`star${on ? " on" : ""}`} aria-pressed={on} aria-label={`מוצר מועדף: ${name}`} onClick={onToggle}>
+      {on ? "⭐" : "☆"}
+    </button>
+  );
+}
 
 /** One receipt line against the price files: did the shelf price and the deal match? */
 function verdict(r: CheckRow): { ok: boolean; text: string } {
@@ -41,17 +43,17 @@ export default function ReceiptCheck({ receiptId }: { receiptId: number }) {
       supabase.from("receipt_items").select("id, reason").eq("receipt_id", receiptId),
     ]).then(([c, r]) => {
       if (stale) return;
-      const reasons = new Map((r.data ?? []).map((x) => [x.id as number, x.reason as BuyReason]));
-      setRows(((c.data ?? []) as CheckRow[]).map((x) => ({ ...x, reason: reasons.get(x.item_id) ?? "preferred" })));
+      const starred = new Set((r.data ?? []).filter((x) => x.reason === "preferred").map((x) => x.id as number));
+      setRows(((c.data ?? []) as CheckRow[]).map((x) => ({ ...x, preferred: starred.has(x.item_id) })));
     });
     return () => {
       stale = true;
     };
   }, [receiptId]);
 
-  async function setReason(id: number, reason: BuyReason) {
-    setRows((rs) => rs?.map((r) => (r.item_id === id ? { ...r, reason } : r)) ?? null);
-    await supabase.from("receipt_items").update({ reason }).eq("id", id);
+  async function setPreferred(id: number, preferred: boolean) {
+    setRows((rs) => rs?.map((r) => (r.item_id === id ? { ...r, preferred } : r)) ?? null);
+    await supabase.from("receipt_items").update({ reason: preferred ? "preferred" : "other" }).eq("id", id);
   }
 
   if (!rows) return <p className="muted small">בודק מול המאגר...</p>;
@@ -76,16 +78,12 @@ export default function ReceiptCheck({ receiptId }: { receiptId: number }) {
                   </div>
                 )}
               </div>
-              <select aria-label={`למה נקנה ${r.raw_name}`} value={r.reason} onChange={(e) => setReason(r.item_id, e.target.value as BuyReason)}>
-                {REASONS.map(([v2, label]) => (
-                  <option key={v2} value={v2}>{label}</option>
-                ))}
-              </select>
+              <Star on={!!r.preferred} name={r.raw_name} onToggle={() => setPreferred(r.item_id, !r.preferred)} />
             </li>
           );
         })}
       </ul>
-      <p className="muted small">רק מה שמסומן "⭐ זה המוצר שלי" נלמד כמוצר מועדף. קניות בגלל מבצע או כתחליף לא משנות את ההעדפות.</p>
+      <p className="muted small">⭐ = המוצר שאני רוצה. רק מוצרים מסומנים נלמדים כמועדפים.</p>
     </div>
   );
 }

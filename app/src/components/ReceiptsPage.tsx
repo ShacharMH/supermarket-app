@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
 import { errorText } from "../lib/errors";
-import { parseReceiptCsv, type BuyReason, type ReceiptRow } from "../lib/basket";
-import ReceiptCheck, { REASONS } from "./ReceiptCheck";
+import { parseReceiptCsv, type ReceiptRow } from "../lib/basket";
+import ReceiptCheck, { Star } from "./ReceiptCheck";
 
 type Branch = { id: number; name: string | null; city: string | null; chains: { name: string } | null };
 type Receipt = { id: number; purchased_at: string | null; total: number | null; branch_id: number | null; receipt_items: { count: number }[] };
@@ -78,7 +78,7 @@ export default function ReceiptsPage() {
     const { error: e2 } = await supabase.from("receipt_items").insert(
       rows.map((r) => ({
         receipt_id: receipt.id, raw_name: r.name, raw_code: r.barcode?.trim() || null, quantity: r.qty, price: r.price,
-        discount: r.discount ?? null, promo: r.promo ?? null, reason: r.reason ?? "preferred",
+        discount: r.discount ?? null, promo: r.promo ?? null, reason: r.preferred ? "preferred" : "other",
       })),
     );
     if (e2) {
@@ -148,10 +148,11 @@ export default function ReceiptsPage() {
         <input aria-label="קובץ CSV של קבלה" type="file" accept=".csv,.tsv,.txt,text/csv" onChange={(e) => onFile(e.target.files?.[0])} />
         <textarea aria-label="טבלת הקבלה" rows={6} value={text} placeholder={SAMPLE} onChange={(e) => preview(e.target.value)} dir="auto" />
         {rows.length > 0 && !branchId && <p className="warn small">כדאי לבחור סניף: כך הקודים הקצרים בקבלה מזוהים, והמחירים נבדקים מול הסניף הנכון.</p>}
+        {rows.length > 0 && <p className="muted small">סמנו ⭐ ליד המוצרים שאתם מעדיפים. רק הם נלמדים; השאר רק נבדקים מול המאגר.</p>}
         {rows.length > 0 && (
           <table className="tbl preview">
             <thead>
-              <tr><th>מוצר · למה נקנה?</th><th>כמות</th><th>מחיר</th></tr>
+              <tr><th>מוצר</th><th>כמות</th><th>מחיר</th><th aria-label="מועדף">⭐</th></tr>
             </thead>
             <tbody>
               {rows.slice(0, 50).map((r, i) => (
@@ -160,12 +161,6 @@ export default function ReceiptsPage() {
                     {r.name}
                     {r.barcode && <div className="muted small">קוד {r.barcode}</div>}
                     {r.discount && <div className="ok-text small">🏷️ {r.promo} · −₪{r.discount.toFixed(2)}</div>}
-                    <select aria-label={`למה נקנה ${r.name}`} value={r.reason ?? "preferred"}
-                      onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, reason: e.target.value as BuyReason } : x)))}>
-                      {REASONS.map(([v, label]) => (
-                        <option key={v} value={v}>{label}</option>
-                      ))}
-                    </select>
                   </td>
                   <td>{r.qty}</td>
                   <td>
@@ -174,6 +169,9 @@ export default function ReceiptsPage() {
                         <s className="muted">{r.price}</s> {(r.price - r.discount).toFixed(2)}
                       </>
                     ) : (r.price ?? "")}
+                  </td>
+                  <td>
+                    <Star on={!!r.preferred} name={r.name} onToggle={() => setRows(rows.map((x, j) => (j === i ? { ...x, preferred: !x.preferred } : x)))} />
                   </td>
                 </tr>
               ))}

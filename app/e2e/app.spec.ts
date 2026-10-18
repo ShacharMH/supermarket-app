@@ -447,7 +447,7 @@ test("equal prices: the store nearer home comes first, with its distance", async
   await expect(other).toContainText('≈'); // Talpiot is placed by its town only
 });
 
-test("receipts: discount lines, why it was bought, and a check against the price files", async ({ page }) => {
+test("receipts: discount lines, starring the preferred, and a check against the price files", async ({ page }) => {
   const items: Record<string, unknown>[] = [];
   await mockSupabase(page, (r, url, body) => {
     const m = r.request().method();
@@ -476,12 +476,16 @@ test("receipts: discount lines, why it was bought, and a check against the price
   );
   await expect(page.locator(".tbl.preview tbody tr")).toHaveCount(2);
   await expect(page.locator(".tbl.preview")).toContainText("−₪10.80");
-  await expect(page.getByRole("combobox", { name: /למה נקנה שוק/ })).toHaveValue("deal");
+  // nothing is starred until you say so
+  const star = page.getByRole("button", { name: /מוצר מועדף: שוק/ });
+  await expect(star).toHaveAttribute("aria-pressed", "false");
+  await star.click();
+  await expect(star).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: /שמירת קבלה \(2/ }).click();
   await expect(page.locator(".receipt-check")).toContainText("2/2 שורות תואמות");
   await expect(page.locator(".receipt-check")).toContainText("המבצע מופיע במאגר");
-  expect(items[1]).toMatchObject({ raw_code: "3046920029759", discount: 10.8, reason: "deal" });
-  expect(items[0]).toMatchObject({ raw_code: "1201589", reason: "preferred" });
+  expect(items[1]).toMatchObject({ raw_code: "3046920029759", discount: 10.8, reason: "preferred" });
+  expect(items[0]).toMatchObject({ raw_code: "1201589", reason: "other" });
   // the saved receipt opens from the list
   const saved = page.locator(".receipt-row").first();
   await expect(saved).toContainText("שופרסל דיל קניון מעלה אדומים");
