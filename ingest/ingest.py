@@ -564,6 +564,15 @@ def main() -> None:
             tracked = select_tracked(conn)
             ingest_prices(conn, tracked)
             try:
+                # search by maker and shelf names, not only the catalogue name
+                with conn.cursor() as cur:
+                    cur.execute("select refresh_search_text()")
+                    log(f"search text refreshed for {cur.fetchone()[0]} products")
+                conn.commit()
+            except Exception as e:  # noqa: BLE001
+                conn.rollback()
+                log(f"search text refresh failed: {e!r}")
+            try:
                 refine_locations(conn)
             except Exception as e:  # noqa: BLE001 - locations are a nicety
                 conn.rollback()
