@@ -253,6 +253,22 @@ export function sameKind(p: Product | null, term: string): ((r: Product) => bool
   };
 }
 
+/**
+ * Whether a shelf name is one of a list term, allowing for the shelf's shortenings:
+ * "שוק.מריר לינדט 90% 100ג" fits "שוקולד מריר 90%" ("שוק." = שוקולד).
+ */
+export function nameFits(term: string, name: string): boolean {
+  const n = normName(name);
+  const tokens = n.split(/[^א-תa-z]+/).filter(Boolean);
+  const abbrevs = [...n.matchAll(/([א-ת]{2,})\./g)].map((m) => m[1]);
+  const compact = n.replace(/\s+/g, "");
+  return normName(term).split(" ").filter(Boolean).every((w) => {
+    if (/\d/.test(w)) return compact.includes(w);
+    const stem = heStem(w);
+    return tokens.some((t) => t.startsWith(stem)) || abbrevs.some((a) => w.startsWith(a));
+  });
+}
+
 export type BuyMode = "weight" | "pack";
 
 // What people usually buy by weight, with a sensible default amount (kg).

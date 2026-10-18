@@ -7,7 +7,7 @@ import CompareTable from "./CompareTable";
 import { errorText } from "../lib/errors";
 import { saveKinds } from "../lib/termKinds";
 import {
-  bestSplits, maker, normName, parseList, rankStores, resolveItem, weighedHint,
+  bestSplits, maker, nameFits, normName, parseList, rankStores, resolveItem, weighedHint,
   type BranchRow, type BuyMode, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
@@ -118,7 +118,7 @@ export default function ListPage() {
     setBusy(true);
     setError(null);
     try {
-      const [prefs, history, clubs, termSettings, profile, areas, located] = await Promise.all([
+      const [prefs, history, clubs, termSettings, profile, areas, located, boughtProducts] = await Promise.all([
         supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
@@ -126,7 +126,9 @@ export default function ListPage() {
         supabase.from("user_profile").select("home_lat, home_lon").maybeSingle(),
         supabase.from("user_areas").select("lat, lon").not("lat", "is", null).order("id").limit(1),
         supabase.from("branches").select("id").eq("tracked", true).eq("geo_exact", true),
+        supabase.rpc("bought_products"),
       ]);
+      const boughtList = (boughtProducts.data ?? []) as Product[];
       // distances are from home, or else from the centre of the first area
       const area = areas.data?.[0];
       const home: Point | null =
@@ -166,7 +168,10 @@ export default function ListPage() {
           search("search_weighed", it.key, 40, !!it.byWeight),
         ]);
         const seen = new Set(packaged.map((p) => p.barcode));
-        return [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))];
+        const found = [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))];
+        // what you bought counts even when the shelf name is shortened beyond search
+        for (const p of found) seen.add(p.barcode);
+        return [...found, ...boughtList.filter((p) => !seen.has(p.barcode) && nameFits(it.key, p.name))];
       };
       await Promise.all(
         items.map(async (it, i) => {

@@ -433,3 +433,14 @@ describe("a weighed product bought in one chain stands for the same kind elsewhe
     expect(meat(w("b:5", "בשר עוף טחון"))).toBe(false);
   });
 });
+
+describe("shortened shelf names", () => {
+  it("fits a list term", async () => {
+    const { nameFits } = await import("./basket");
+    expect(nameFits("שוקולד מריר 90%", "שוק.מריר לינדט 90% 100ג")).toBe(true);
+    expect(nameFits("שוקולד מריר 70%", "שוק.מריר לינדט 90% 100ג")).toBe(false);
+    expect(nameFits("גבינת עיזים", "גב.עיזים חצי קשה 32%משקל")).toBe(true);
+    expect(nameFits("חלב", "שוק.מריר לינדט 90% 100ג")).toBe(false);
+    expect(nameFits("ביצים", "12 ביצי משק טריות L לסר")).toBe(true);
+  });
+});
