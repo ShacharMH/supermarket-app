@@ -24,6 +24,13 @@ function verdict(r: CheckRow): { ok: boolean; text: string } {
   if (r.db_price == null) return { ok: false, text: "זוהה, אבל אין לו מחיר בסניף הזה במאגר" };
   if (r.paid == null) return { ok: true, text: `במאגר ${money(r.db_price)}` };
   if (r.is_weighted) {
+    // a weight on the receipt ("0.491") can be checked; a bare "1" only tells how much was bought
+    if (r.quantity && r.quantity !== Math.round(r.quantity)) {
+      const expected = r.quantity * r.db_price;
+      return Math.abs(expected - r.paid) < 0.03
+        ? { ok: true, text: `תואם למאגר (${r.quantity} ק"ג × ${money(r.db_price)})` }
+        : { ok: false, text: `במאגר ${money(r.db_price)} לק"ג → ${money(expected)}, בקבלה ${money(r.paid)}` };
+    }
     const kg = r.paid / r.db_price;
     return { ok: true, text: `${money(r.db_price)} לק"ג במאגר → שקלת כ-${Math.round(kg * 1000)} גרם` };
   }
