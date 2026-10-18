@@ -16,3 +16,15 @@ describe("categories", () => {
     expect(g.map((x) => x.cat.id)).toEqual(["produce", "bakery", "dairy", "cleaning"]);
   });
 });
+
+describe("the first word decides the department", () => {
+  it("files legumes and chocolate correctly", () => {
+    expect(categoryOf("שעועית לבנה").id).toBe("pantry");
+    expect(categoryOf("שוקולד מריר 90%").id).toBe("pantry");
+    expect(categoryOf("שוקו").id).toBe("dairy");
+    expect(categoryOf("לבנה").id).toBe("dairy");
+    expect(categoryOf("שעועית ירוקה").id).toBe("produce");
+    expect(categoryOf("גבינה צהובה").id).toBe("dairy");
+    expect(categoryOf("חזה עוף").id).toBe("meat");
+  });
+});

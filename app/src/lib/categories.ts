@@ -7,7 +7,7 @@ const CATS: [Category, RegExp][] = [
   [{ id: "bakery", label: "מאפים ולחם", icon: "🍞" },
     /(לחם|לחמני|פיתה|פיתות|באגט|חלה|חלות|טורטיי|לאפה|עוגה|עוגיות|קרואסון|בורקס|מאפ)/],
   [{ id: "dairy", label: "מוצרי חלב וביצים", icon: "🥛" },
-    /(חלב|קוטג|גבינ|גאודה|עמק|פרמזן|ריקוטה|פטה|חלומי|קממבר|עיזים|יוגורט|יופלה|מעדן|שמנת|חמאה|לבן|לבנה|אשל|בולגרית|מוצרלה|צפתית|ביצים|ביצה|דנונה|מילקי|שוקו)/],
+    /(חלב|קוטג|גבינ|גאודה|עמק|פרמזן|ריקוטה|פטה|חלומי|קממבר|עיזים|יוגורט|יופלה|מעדן|שמנת|חמאה|לבן|לבנה|אשל|בולגרית|מוצרלה|צפתית|ביצים|ביצה|דנונה|מילקי|שוקו(?![א-ת]))/],
   [{ id: "meat", label: "בשר, עוף ודגים", icon: "🥩" },
     /(בשר|טחון|עוף|הודו|שניצל|פרגית|חזה|כרעיים|שוקיים|כנפיים|אנטריקוט|סינטה|פילה|צלעות|קבב|המבורגר|נקניק|נקניקי|פסטרמה|סלמי|דג|דגים|סלמון|טונה טרי|אמנון|דניס|לברק)/],
   [{ id: "frozen", label: "קפואים", icon: "🧊" },
@@ -34,8 +34,15 @@ export function categoryOf(text: string): Category {
   // "מלפפונים במלח" / "טונה" belong to the pantry even though they name produce or fish
   if (/(במלח|בחומץ|חמוצ|משומר|שימורים|קופסת)/.test(t)) return CATS.find(([c]) => c.id === "pantry")![0];
   if (/קפוא/.test(t)) return CATS.find(([c]) => c.id === "frozen")![0];
-  for (const [c, re] of CATS) if (re.test(t)) return c;
-  return OTHER;
+  // the word that comes first decides: "שעועית לבנה" is a legume, not labneh; ties go to
+  // the earlier department ("שעועית ירוקה" is produce)
+  let best: Category = OTHER;
+  let at = Infinity;
+  for (const [c, re] of CATS) {
+    const i = t.search(re);
+    if (i >= 0 && i < at) [best, at] = [c, i];
+  }
+  return best;
 }
 
 /** Group items by department in walking order. */
