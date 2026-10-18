@@ -518,7 +518,7 @@ export default function ListPage() {
 
           {result.splits.length > 0 && (
             <section className="card">
-              <h3>אפשר לחסוך עוד בשני סופרים</h3>
+              <h3>אפשר לחסוך עוד בפיצול הקנייה</h3>
               {result.splits.map((s) => (
                 <details key={`${s.a.branch_id}-${s.b.branch_id}`} className="store">
                   <summary>
@@ -529,7 +529,7 @@ export default function ListPage() {
                   </summary>
                   <h4>{storeTitle(s.a)}</h4>
                   <ShoppingList id={`s${s.a.branch_id}-${s.b.branch_id}a`} title={storeTitle(s.a)} lines={s.linesA} weighted={weighted} products={products} />
-                  <h4>{storeTitle(s.b)}</h4>
+                  <h4>{storeTitle(s.b)}{s.deliveryFee > 0 && <span className="muted small"> · כולל משלוח {money(s.deliveryFee)}</span>}</h4>
                   <ShoppingList id={`s${s.a.branch_id}-${s.b.branch_id}b`} title={storeTitle(s.b)} lines={s.linesB} weighted={weighted} products={products} />
                 </details>
               ))}

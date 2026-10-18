@@ -83,6 +83,7 @@ export type SplitOption = {
   total: number;
   missing: string[];
   saving: number;
+  deliveryFee: number; // when the second store delivers
 };
 
 // "2 קוטג", "קוטג x2", "קוטג ×2", "קוטג *2". A trailing bare number is NOT a
@@ -548,12 +549,14 @@ export function bestSplits(
   opts: { minSaving: number; maxPairs?: number; deliveryFee: number; home?: Point | null },
 ): SplitOption[] {
   if (!best) return [];
-  const physical = rows.filter((r) => !r.is_online && r.lines.length > 0);
+  // two stores, or a store plus one delivery (pantry from החישוק, the fresh things nearby)
+  const stores = rows.filter((r) => r.lines.length > 0).sort((x, y) => Number(x.is_online) - Number(y.is_online));
   const out: SplitOption[] = [];
-  for (let i = 0; i < physical.length; i++) {
-    for (let j = i + 1; j < physical.length; j++) {
-      const a = physical[i];
-      const b = physical[j];
+  for (let i = 0; i < stores.length; i++) {
+    for (let j = i + 1; j < stores.length; j++) {
+      const a = stores[i];
+      const b = stores[j];
+      if (a.is_online) continue; // never two deliveries
       const la = new Map(a.lines.map((l) => [l.key, l]));
       const lb = new Map(b.lines.map((l) => [l.key, l]));
       const linesA: Line[] = [];
@@ -568,9 +571,10 @@ export function bestSplits(
       }
       if (linesA.length === 0 || linesB.length === 0) continue;
       if (missing.length > best.missing.length) continue;
-      const total = sum([...linesA, ...linesB].map((l) => l.total));
+      const deliveryFee = b.is_online ? opts.deliveryFee : 0;
+      const total = sum([...linesA, ...linesB].map((l) => l.total).concat(deliveryFee));
       const saving = Math.round((best.total - total) * 100) / 100;
-      if (saving >= opts.minSaving) out.push({ a, b, linesA, linesB, total, missing, saving });
+      if (saving >= opts.minSaving) out.push({ a, b, linesA, linesB, total, missing, saving, deliveryFee });
     }
   }
   const trip = (o: SplitOption) => (distanceKm(opts.home, o.a) ?? 0) + (distanceKm(opts.home, o.b) ?? 0);

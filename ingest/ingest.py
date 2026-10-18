@@ -25,6 +25,7 @@ from il_supermarket_scarper import FileTypesFilters, ScraperFactory
 from il_supermarket_scarper.utils.files.file_output import DiskFileOutput
 
 sys.path.insert(0, os.path.dirname(__file__))
+import hahishook  # noqa: E402
 from geo import geocode, geocode_exact, haversine_km, photon_exact, load_city_codes, norm_city  # noqa: E402
 from parse_xml import parse_prices, parse_promos, parse_stores  # noqa: E402
 
@@ -367,13 +368,15 @@ def select_tracked(conn) -> list[tuple]:
         tracked.update(r[0] for r in cur.fetchall())
 
     with conn.cursor() as cur:
-        cur.execute("update branches set tracked = (id = any(%s))", (list(tracked),))
+        # החישוק has its own feed (hahishook.py) and stays tracked
+        cur.execute("update branches set tracked = (id = any(%s)) where chain_id <> 'hahishook'", (list(tracked),))
         # free space: drop data of branches no longer tracked
         cur.execute("delete from prices where branch_id in (select id from branches where not tracked)")
         cur.execute("delete from promotions where branch_id in (select id from branches where not tracked)")
         cur.execute(
             """select b.id, b.store_id, c.scraper, c.chain_id from branches b
-               join chains c using (chain_id) where b.tracked order by c.scraper, b.store_id"""
+               join chains c using (chain_id) where b.tracked and c.chain_id <> 'hahishook'
+               order by c.scraper, b.store_id"""
         )
         rows = cur.fetchall()
     conn.commit()
@@ -531,6 +534,18 @@ def ingest_prices(conn, tracked_rows) -> None:
                     log(f"  store {store_id}: failed to load: {e!r}")
 
 
+def ingest_hahishook(conn) -> None:
+    got = hahishook.fetch_tsv()
+    if not got:
+        log("hahishook: no price file for today or the last two days")
+        return
+    day, text = got
+    items = hahishook.parse(text)
+    bid = hahishook.ensure_branch(conn)
+    load_prices(conn, bid, items)
+    log(f"hahishook {day}: {len(items)} prices")
+
+
 def stores_are_fresh(conn) -> bool:
     with conn.cursor() as cur:
         cur.execute("select coalesce(max(updated_at) > now() - make_interval(days => %s), false) from chains",
@@ -563,6 +578,11 @@ def main() -> None:
                 log("skipping store lists (fresh enough)")
             tracked = select_tracked(conn)
             ingest_prices(conn, tracked)
+            try:
+                ingest_hahishook(conn)
+            except Exception as e:  # noqa: BLE001 - one shop must not fail the run
+                conn.rollback()
+                log(f"hahishook failed: {e!r}")
             try:
                 # search by maker and shelf names, not only the catalogue name
                 with conn.cursor() as cur:

@@ -89,10 +89,15 @@ describe("edge cases", () => {
   it("a store with no lines is not ranked", () => {
     expect(rankStores([branch(1, [])], ["x"], { deliveryFee: 0 })).toEqual([]);
   });
-  it("splits never use online stores", () => {
+  it("a split may add one delivery, with its fee, never two", () => {
     const rows = [branch(1, [line("x", 1), line("y", 50)]), branch(2, [line("x", 50), line("y", 1)], true)];
-    const ranked = rankStores(rows, ["x", "y"], { deliveryFee: 0 });
-    expect(bestSplits(rows, ["x", "y"], ranked[0], { minSaving: 0, deliveryFee: 0 })).toEqual([]);
+    const ranked = rankStores(rows, ["x", "y"], { deliveryFee: 10 });
+    const s = bestSplits(rows, ["x", "y"], ranked[0], { minSaving: 0, deliveryFee: 10 });
+    expect(s).toHaveLength(1);
+    expect(s[0]).toMatchObject({ total: 12, deliveryFee: 10 });
+    expect(s[0].b.branch_id).toBe(2);
+    const twoOnline = [branch(3, [line("x", 1), line("y", 50)], true), branch(4, [line("x", 50), line("y", 1)], true)];
+    expect(bestSplits(twoOnline, ["x", "y"], rankStores(twoOnline, ["x", "y"], { deliveryFee: 0 })[0], { minSaving: 0, deliveryFee: 0 })).toEqual([]);
   });
   it("receipt CSV without a name column explains the problem", () => {
     expect(() => parseReceiptCsv("a,b\n1,2")).toThrow(/מוצר/);
