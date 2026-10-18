@@ -73,6 +73,7 @@ details > summary { cursor: pointer; padding: 6px 0; list-style-position: inside
 .lprice { white-space: nowrap; }
 .tag { display: inline-block; font-size: 0.72rem; padding: 1px 6px; border-radius: 999px; margin-inline-start: 6px; vertical-align: middle; }
 .tag.promo { background: var(--promo-bg); color: var(--promo); }
+.tag.fav { background: var(--chip); color: var(--text); }
 .tag.alt { background: var(--chip); color: var(--text); }
 .tag.miss { background: none; color: var(--warn); border: 1px solid var(--warn); }
 .ikey { font-weight: 700; }

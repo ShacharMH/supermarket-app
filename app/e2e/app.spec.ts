@@ -510,3 +510,27 @@ test("receipts: the store column picks the branch", async ({ page }) => {
   await page.locator("textarea").fill("תאריך,סניף,מוצר,כמות,מחיר\n18/10/2026,שופרסל דיל קניון מעלה אדומים,מלפפון,0.39,2.69");
   await expect(page.getByRole("combobox", { name: "סניף הקנייה" })).toHaveValue("7");
 });
+
+test("a starred purchase joins its list term by its shelf name, marked as preferred", async ({ page }) => {
+  const mozza = { ...PRODUCT, barcode: "3560071005214", name: "שוקולד מריר 90% מוצץ", min_price: 9.9, max_price: 9.9, quantity: 80 };
+  const lindt = { ...PRODUCT, barcode: "3046920029759", name: "שוקולד לינדט אקסלנס", min_price: 22.9, max_price: 22.9, quantity: 100 };
+  let payload = "";
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: [mozza] });
+    if (url.includes("rpc/bought_products")) return r.fulfill({ json: [lindt] });
+    if (url.includes("rpc/bought_product_names")) return r.fulfill({ json: [{ barcode: lindt.barcode, item_name: "שוק.מריר לינדט 90% 100ג" }] });
+    if (url.includes("purchase_history")) return r.fulfill({ json: [{ barcode: lindt.barcode, times_bought: 1 }] });
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "שוקולד מריר 90%" } }] });
+    if (url.includes("rpc/price_basket")) {
+      payload = body;
+      return r.fulfill({ json: [{ ...ROWS[0], lines: [{ key: "שוקולד מריר 90%", qty: 1, barcode: mozza.barcode, name: mozza.name, price: 9.9, total: 9.9, promo: null, promo_min_qty: null, preferred: false }] }] });
+    }
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".item")).toContainText("כמו בקבלות: שוק.מריר לינדט 90% 100ג");
+  expect(JSON.parse(payload).items[0].preferred).toEqual([lindt.barcode]);
+  await page.getByRole("button", { name: "שינוי" }).click();
+  await expect(page.locator(".item li", { hasText: "לינדט" })).toContainText("⭐ מועדף");
+});

@@ -118,7 +118,7 @@ export default function ListPage() {
     setBusy(true);
     setError(null);
     try {
-      const [prefs, history, clubs, termSettings, profile, areas, located, boughtProducts] = await Promise.all([
+      const [prefs, history, clubs, termSettings, profile, areas, located, boughtProducts, boughtNames] = await Promise.all([
         supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
@@ -127,8 +127,18 @@ export default function ListPage() {
         supabase.from("user_areas").select("lat, lon").not("lat", "is", null).order("id").limit(1),
         supabase.from("branches").select("id").eq("tracked", true).eq("geo_exact", true),
         supabase.rpc("bought_products"),
+        supabase.rpc("bought_product_names"),
       ]);
-      const boughtList = (boughtProducts.data ?? []) as Product[];
+      // starred purchases with all their shelf names: the catalogue name is often generic
+      const shelfNames = new Map<string, string[]>();
+      for (const r of (boughtNames.data ?? []) as { barcode: string; item_name: string }[])
+        shelfNames.set(r.barcode, [...(shelfNames.get(r.barcode) ?? []), r.item_name]);
+      const boughtFor = (term: string) =>
+        ((boughtProducts.data ?? []) as Product[]).flatMap((p) => {
+          if (nameFits(term, p.name)) return [p];
+          const shelf = shelfNames.get(p.barcode)?.find((n) => nameFits(term, n));
+          return shelf ? [{ ...p, name: shelf }] : [];
+        });
       // distances are from home, or else from the centre of the first area
       const area = areas.data?.[0];
       const home: Point | null =
@@ -171,7 +181,7 @@ export default function ListPage() {
         const found = [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))];
         // what you bought counts even when the shelf name is shortened beyond search
         for (const p of found) seen.add(p.barcode);
-        return [...found, ...boughtList.filter((p) => !seen.has(p.barcode) && nameFits(it.key, p.name))];
+        return [...found, ...boughtFor(it.key).filter((p) => !seen.has(p.barcode))];
       };
       await Promise.all(
         items.map(async (it, i) => {
@@ -435,7 +445,10 @@ export default function ListPage() {
                           const seen = new Map<string, Product>();
                           for (const c of [...it.candidates].sort((a, b) => a.min_price - b.min_price))
                             if (!seen.has(normName(c.name))) seen.set(normName(c.name), c);
-                          const all = [...seen].sort(([a], [b]) => Number(inBasket.has(b)) - Number(inBasket.has(a)));
+                          const fav = (c: Product) => Number(it.preferred.includes(c.barcode));
+                          const all = [...seen].sort(
+                            ([a, ca], [b, cb]) => Number(inBasket.has(b)) - Number(inBasket.has(a)) || fav(cb) - fav(ca),
+                          );
                           const showAllMatches = expanded.has(it.key);
                           const shown = showAllMatches ? all : all.slice(0, 8);
                           const ex = result.excluded.get(it.key) ?? [];
@@ -447,6 +460,7 @@ export default function ListPage() {
                                   <li key={n} className={inBasket.has(n) ? "in-basket" : ""}>
                                     <span>
                                       {c.name}{" "}
+                                      {it.preferred.includes(c.barcode) && <span className="tag fav">⭐ מועדף</span>}{" "}
                                       {inBasket.has(n) && <span className="tag promo">בסל המומלץ</span>}{" "}
                                       <span className="muted small">מ-{money(c.min_price)}{c.is_weighted ? ' לק"ג' : ""}</span>
                                     </span>
