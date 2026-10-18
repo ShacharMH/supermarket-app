@@ -28,6 +28,7 @@ export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState<number | null>(null); // receipt shown against the price files
+  const [checkVersion, setCheckVersion] = useState(0);
 
   async function load() {
     const [b, r] = await Promise.all([
@@ -92,6 +93,19 @@ export default function ReceiptsPage() {
     setBusy(false);
     load();
   }
+
+  // a receipt saved without a branch (or with the wrong one): set it and match the codes again
+  async function setReceiptBranch(id: number, branch: string) {
+    await supabase.from("receipts").update({ branch_id: branch ? Number(branch) : null }).eq("id", id);
+    await supabase.rpc("resolve_receipt", { p_receipt: id });
+    setCheckVersion((v) => v + 1);
+    load();
+  }
+
+  const branchLabel = (id: number | null) => {
+    const b = branches.find((x) => x.id === id);
+    return b ? `${b.chains?.name ?? ""} ${b.name ?? ""}`.trim() : null;
+  };
 
   async function remove(id: number) {
     await supabase.from("receipts").delete().eq("id", id);
@@ -172,28 +186,32 @@ export default function ReceiptsPage() {
         {msg && <p className="note">{msg}</p>}
       </section>
 
-      {checking && (
-        <section className="card">
-          <h3>הקבלה מול המאגר</h3>
-          <ReceiptCheck receiptId={checking} />
-        </section>
-      )}
-
       <section className="card">
         <h3>קבלות קודמות</h3>
         {receipts.length === 0 && <p className="muted small">אין עדיין.</p>}
         <ul className="plain">
           {receipts.map((r) => (
-            <li key={r.id}>
-              <span>
-                {r.purchased_at ?? "ללא תאריך"} · {r.receipt_items?.[0]?.count ?? 0} פריטים{r.total ? ` · ₪${r.total}` : ""}
-              </span>
-              <span>
-                <button className="link" onClick={() => setChecking(checking === r.id ? null : r.id)}>
-                  {checking === r.id ? "סגירה" : "בדיקה"}
-                </button>{" "}
+            <li key={r.id} className="receipt-row">
+              <div className="receipt-head">
+                <button className="link receipt-open" aria-expanded={checking === r.id} onClick={() => setChecking(checking === r.id ? null : r.id)}>
+                  {checking === r.id ? "▾" : "◂"} 📄 {r.purchased_at ?? "ללא תאריך"} · {branchLabel(r.branch_id) ?? "סניף לא נבחר"} ·{" "}
+                  {r.receipt_items?.[0]?.count ?? 0} פריטים{r.total ? ` · ₪${r.total}` : ""}
+                </button>
                 <button className="link" onClick={() => remove(r.id)}>מחיקה</button>
-              </span>
+              </div>
+              {checking === r.id && (
+                <div className="receipt-body">
+                  <select aria-label="סניף הקבלה" value={r.branch_id ?? ""} onChange={(e) => setReceiptBranch(r.id, e.target.value)}>
+                    <option value="">באיזה סניף? (נדרש לבדיקת המחירים)</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.chains?.name} · {b.name} {b.city ? `(${b.city})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <ReceiptCheck key={`${r.id}-${checkVersion}`} receiptId={r.id} />
+                </div>
+              )}
             </li>
           ))}
         </ul>

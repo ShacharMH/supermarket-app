@@ -452,12 +452,14 @@ test("receipts: discount lines, why it was bought, and a check against the price
   await mockSupabase(page, (r, url, body) => {
     const m = r.request().method();
     if (url.includes("branches")) return r.fulfill({ json: [{ id: 7, name: "דיל קניון מעלה אדומים", city: "מעלה אדומים", chains: { name: "שופרסל" } }] });
-    if (url.includes("/receipts") && m === "POST") return r.fulfill({ json: { id: 42 } });
-    if (url.includes("receipt_items") && m === "POST") {
+    if (url.includes("/rest/v1/receipts") && m === "POST") return r.fulfill({ json: { id: 42 } });
+    if (url.includes("/rest/v1/receipts"))
+      return r.fulfill({ json: items.length ? [{ id: 42, purchased_at: "2026-10-18", total: 73.9, branch_id: 7, receipt_items: [{ count: 2 }] }] : [] });
+    if (url.includes("/rest/v1/receipt_items") && m === "POST") {
       items.push(...JSON.parse(body));
       return r.fulfill({ json: [] });
     }
-    if (url.includes("receipt_items")) return r.fulfill({ json: [{ id: 1, reason: "preferred" }, { id: 2, reason: "deal" }] });
+    if (url.includes("/rest/v1/receipt_items")) return r.fulfill({ json: [{ id: 1, reason: "preferred" }, { id: 2, reason: "deal" }] });
     if (url.includes("rpc/resolve_receipt")) return r.fulfill({ json: 2 });
     if (url.includes("rpc/receipt_check"))
       return r.fulfill({ json: [
@@ -480,4 +482,11 @@ test("receipts: discount lines, why it was bought, and a check against the price
   await expect(page.locator(".receipt-check")).toContainText("המבצע מופיע במאגר");
   expect(items[1]).toMatchObject({ raw_code: "3046920029759", discount: 10.8, reason: "deal" });
   expect(items[0]).toMatchObject({ raw_code: "1201589", reason: "preferred" });
+  // the saved receipt opens from the list
+  const saved = page.locator(".receipt-row").first();
+  await expect(saved).toContainText("שופרסל דיל קניון מעלה אדומים");
+  await saved.getByRole("button", { name: /📄/ }).click();
+  await expect(page.locator(".receipt-check")).toHaveCount(0);
+  await saved.getByRole("button", { name: /📄/ }).click();
+  await expect(saved.locator(".receipt-check")).toContainText("12 ביצי משק טריות");
 });

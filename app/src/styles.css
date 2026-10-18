@@ -229,3 +229,7 @@ li.done .sm-name { text-decoration: line-through; }
 .check-list li > div { min-width: 0; overflow-wrap: anywhere; }
 .check-list select { width: auto; max-width: 150px; font-size: 0.85em; }
 .tbl.preview select { display: block; margin-top: 4px; width: auto; max-width: 100%; font-size: 0.85em; }
+.receipt-row { display: block !important; }
+.receipt-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.receipt-open { text-align: start; overflow-wrap: anywhere; }
+.receipt-body { margin-top: 8px; }

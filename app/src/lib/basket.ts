@@ -229,7 +229,7 @@ function closestPack(pool: Product[], [unit, amount]: [string, number]): Product
   return best;
 }
 
-const NAME_NOISE = /^(\d+%?|\(?\d+\)?|ק"ג|קג|גרם|גר|שקיל|במשקל|מס|של|עם|ב|ו|ל|-)$/;
+const NAME_NOISE = /^(\d+%?|\(?\d+\)?|ק"ג|קג|גרם|גר|שקיל|במשקל|משקל|מס|של|עם|ב|ו|ל|-)$/;
 
 /**
  * Words that describe what kind of product this is beyond the list term
@@ -238,15 +238,18 @@ const NAME_NOISE = /^(\d+%?|\(?\d+\)?|ק"ג|קג|גרם|גר|שקיל|במשקל
  */
 export function sameKind(p: Product | null, term: string): ((r: Product) => boolean) | null {
   if (!p) return null;
-  const norm = (x: string) => x.replace(/["'`׳״()]/g, "").toLowerCase();
-  const termWords = new Set(norm(term).split(/\s+/));
-  const words = norm(p.name)
-    .split(/\s+/)
-    .filter((w) => w.length >= 2 && !termWords.has(w) && !NAME_NOISE.test(w));
+  // shelf names glue and shorten words ("גב.עיזים חצי קשה 32%משקל"): compare letter runs,
+  // skip 1-2 letter abbreviations and the list term's own words
+  const tokens = (x: string) =>
+    x.replace(/["'`׳״]/g, "").toLowerCase().split(/[^א-תa-z]+/).filter((w) => w.length >= 3 && !NAME_NOISE.test(w));
+  const alike = (a: string, b: string) => heStem(a) === heStem(b) || (a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4));
+  const termWords = tokens(term);
+  const words = tokens(p.name).filter((w) => !termWords.some((t) => alike(w, t)));
   if (!words.length) return null;
   return (r) => {
-    const name = ` ${norm(r.name)} `;
-    return r.barcode === p.barcode || words.every((w) => name.includes(` ${w}`));
+    if (r.barcode === p.barcode) return true;
+    const have = tokens(r.name);
+    return words.every((w) => have.some((h) => alike(h, w)));
   };
 }
 

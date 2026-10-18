@@ -420,3 +420,16 @@ describe("receipt discount lines", () => {
     expect(rows[1]).toMatchObject({ barcode: "3046920029759", qty: 2, price: 45.8, discount: 10.8, promo: "שוקולד אקסלנט 50-100 גרם", reason: "deal" });
   });
 });
+
+describe("a weighed product bought in one chain stands for the same kind elsewhere", () => {
+  it("reads shortened shelf names", async () => {
+    const { sameKind } = await import("./basket");
+    const w = (barcode: string, name: string): Product => ({ ...prod(barcode, null, null), name, is_weighted: true });
+    const like = sameKind(w("a:1", "גב.עיזים חצי קשה 32%משקל"), "גבינת עיזים")!;
+    expect(like(w("b:2", "גבינת עיזים חצי קשה 30% במשקל"))).toBe(true);
+    expect(like(w("c:3", "גבינת עיזים רכה"))).toBe(false);
+    const meat = sameKind(w("a:2", "בשר בקר טחון טרי"), "בשר טחון")!;
+    expect(meat(w("b:4", "בשר בקר טחון טרי במשקל"))).toBe(true);
+    expect(meat(w("b:5", "בשר עוף טחון"))).toBe(false);
+  });
+});
