@@ -6,7 +6,9 @@ on:
     branches: [main]
     paths: [".github/ingest-trigger"]
   schedule:
-    - cron: "17 3 * * *"   # every night, ~06:17 Israel time
+    # 06:17 UTC = 09:17 Israel in summer, 08:17 in winter: after every chain has
+    # published its full daily files (the last, Osher Ad, at 08:00)
+    - cron: "17 6 * * *"
   workflow_dispatch:
     inputs:
       chains:
