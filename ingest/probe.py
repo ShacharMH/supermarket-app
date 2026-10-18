@@ -1,14 +1,16 @@
-"""One-off diagnostics that need the network GitHub Actions has (the chains' file
-servers, other shops' sites). Results go to ingest_log as 'probe ...' rows."""
+"""One-off diagnostics that need the network GitHub Actions has. Results go to
+ingest_log as 'probe ...' rows."""
 
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+import sys
+from collections import Counter
 
 import psycopg
-import requests
+
+sys.path.insert(0, os.path.dirname(__file__))
+import hahishook  # noqa: E402
 
 
 def main() -> None:
@@ -16,26 +18,17 @@ def main() -> None:
 
     def out(msg: str) -> None:
         print(msg)
-        for i in range(0, len(msg), 3500):
-            conn.execute("insert into ingest_log (msg) values (%s)", (f"probe {msg[i:i + 3500]}",))
+        conn.execute("insert into ingest_log (msg) values (%s)", (f"probe {msg[:3500]}",))
 
-    # החישוק: a daily TSV of all products and prices (shared by them for CHP and anyone)
-    today = datetime.now(ZoneInfo("Asia/Jerusalem")).date()
-    for days in range(0, 3):
-        day = (today - timedelta(days=days)).strftime("%Y%m%d")
-        for scheme in ("https", "http"):
-            url = f"{scheme}://hahishook.com/wp-content/uploads/chp/{day}.tsv"
-            try:
-                r = requests.get(url, timeout=60, headers={"User-Agent": "supermarket-app (personal price comparison)"})
-                lines = r.text.splitlines()
-                out(f"{url} -> {r.status_code} {r.headers.get('content-type')} {len(r.content)} bytes, {len(lines)} lines")
-                if r.ok and len(lines) > 1:
-                    out("head: " + repr("\n".join(lines[:4]))[:3400])
-                    widths = sorted({len(l.split('\t')) for l in lines[:500]})
-                    out(f"columns per line: {widths}")
-                    return
-            except Exception as e:  # noqa: BLE001
-                out(f"{url} -> error {e!r}")
+    day, text = hahishook.fetch_tsv()
+    lines = text.splitlines()
+    cols = [l.split("\t") for l in lines]
+    out(f"hahishook {day}: {len(lines)} lines; widths {Counter(len(c) for c in cols).most_common(5)}")
+    out(f"col0 digit: {sum(c[0].strip().isdigit() for c in cols)}; col11 values {Counter(c[11].strip() if len(c) > 11 else None for c in cols).most_common(6)}")
+    out(f"col1 numeric>0: {sum(1 for c in cols if hahishook._num(c[1] if len(c) > 1 else ''))}; col2: {sum(1 for c in cols if len(c) > 2 and hahishook._num(c[2]))}")
+    out(f"parsed items: {len(hahishook.parse(text))}")
+    odd = [l for l in lines if len(l.split('\t')) < 10][:3]
+    out("short lines: " + repr(odd)[:3000])
 
 
 if __name__ == "__main__":
