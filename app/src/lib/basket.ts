@@ -562,7 +562,15 @@ export function bestSplits(
 
 // ---------------------------------------------------------------- receipts CSV
 
-export type ReceiptRow = { date: string | null; store: string | null; name: string; barcode: string | null; qty: number; price: number | null };
+/** Why an item was bought: only "preferred" teaches the app what you like. */
+export type BuyReason = "preferred" | "deal" | "substitute";
+
+export type ReceiptRow = {
+  date: string | null; store: string | null; name: string; barcode: string | null; qty: number; price: number | null;
+  discount?: number; // a discount line printed under the item ("שוקולד אקסלנס 50-100 גרם  -10.80")
+  promo?: string;
+  reason?: BuyReason;
+};
 
 const HEADERS: Record<string, keyof ReceiptRow> = {
   date: "date", תאריך: "date",
@@ -606,7 +614,7 @@ export function parseReceiptCsv(text: string): ReceiptRow[] {
   const sep = [",", "\t", ";"].sort((a, b) => lines[0].split(b).length - lines[0].split(a).length)[0];
   const header = splitCsvLine(lines[0], sep).map((h) => HEADERS[h.toLowerCase()] ?? null);
   if (!header.includes("name")) throw new Error("חסרה עמודת שם מוצר (name / מוצר)");
-  return lines.slice(1).map((l) => {
+  const rows = lines.slice(1).map((l) => {
     const cells = splitCsvLine(l, sep);
     const row: ReceiptRow = { date: null, store: null, name: "", barcode: null, qty: 1, price: null };
     header.forEach((h, i) => {
@@ -619,6 +627,21 @@ export function parseReceiptCsv(text: string): ReceiptRow[] {
     });
     return row;
   }).filter((r) => r.name);
+  // a negative line is the discount of the item above it, not an item
+  const out: ReceiptRow[] = [];
+  for (const r of rows) {
+    const prev = out[out.length - 1];
+    if (r.price !== null && r.price < 0) {
+      if (prev) {
+        prev.discount = Math.round(((prev.discount ?? 0) - r.price) * 100) / 100;
+        prev.promo = prev.promo ? `${prev.promo}; ${r.name}` : r.name;
+        prev.reason = "deal";
+      }
+      continue;
+    }
+    out.push(r);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- shopping list

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
 import { errorText } from "../lib/errors";
-import { parseReceiptCsv, type ReceiptRow } from "../lib/basket";
+import { parseReceiptCsv, type BuyReason, type ReceiptRow } from "../lib/basket";
+import ReceiptCheck, { REASONS } from "./ReceiptCheck";
 
 type Branch = { id: number; name: string | null; city: string | null; chains: { name: string } | null };
 type Receipt = { id: number; purchased_at: string | null; total: number | null; branch_id: number | null; receipt_items: { count: number }[] };
@@ -26,6 +27,7 @@ export default function ReceiptsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState<number | null>(null); // receipt shown against the price files
 
   async function load() {
     const [b, r] = await Promise.all([
@@ -57,7 +59,7 @@ export default function ReceiptsPage() {
   async function save() {
     if (rows.length === 0) return;
     setBusy(true);
-    const total = rows.reduce((s, r) => s + (r.price ?? 0), 0);
+    const total = rows.reduce((s, r) => s + (r.price ?? 0) - (r.discount ?? 0), 0);
     const { data: receipt, error } = await supabase
       .from("receipts")
       .insert({
@@ -73,15 +75,18 @@ export default function ReceiptsPage() {
       return setMsg(errorText(error ?? "שגיאה"));
     }
     const { error: e2 } = await supabase.from("receipt_items").insert(
-      rows.map((r) => ({ receipt_id: receipt.id, raw_name: r.name, barcode: r.barcode?.replace(/^0+/, "") || null, quantity: r.qty, price: r.price })),
+      rows.map((r) => ({
+        receipt_id: receipt.id, raw_name: r.name, raw_code: r.barcode?.trim() || null, quantity: r.qty, price: r.price,
+        discount: r.discount ?? null, promo: r.promo ?? null, reason: r.reason ?? "preferred",
+      })),
     );
     if (e2) {
       setBusy(false);
       return setMsg(errorText(e2));
     }
     const { data: matched } = await supabase.rpc("resolve_receipt", { p_receipt: receipt.id });
-    const withBarcode = rows.filter((r) => r.barcode).length;
-    setMsg(`נשמרו ${rows.length} פריטים. ${withBarcode} עם ברקוד, ${matched ?? 0} זוהו לפי שם. מעכשיו הם ייחשבו המוצרים המועדפים שלך.`);
+    setMsg(`נשמרו ${rows.length} פריטים, ${matched ?? 0} זוהו במאגר. למטה: השוואה למחירים במאגר.`);
+    setChecking(receipt.id);
     setText("");
     setRows([]);
     setBusy(false);
@@ -128,14 +133,35 @@ export default function ReceiptsPage() {
         </select>
         <input aria-label="קובץ CSV של קבלה" type="file" accept=".csv,.tsv,.txt,text/csv" onChange={(e) => onFile(e.target.files?.[0])} />
         <textarea aria-label="טבלת הקבלה" rows={6} value={text} placeholder={SAMPLE} onChange={(e) => preview(e.target.value)} dir="auto" />
+        {rows.length > 0 && !branchId && <p className="warn small">כדאי לבחור סניף: כך הקודים הקצרים בקבלה מזוהים, והמחירים נבדקים מול הסניף הנכון.</p>}
         {rows.length > 0 && (
           <table className="tbl preview">
             <thead>
-              <tr><th>מוצר</th><th>כמות</th><th>מחיר</th></tr>
+              <tr><th>מוצר · למה נקנה?</th><th>כמות</th><th>מחיר</th></tr>
             </thead>
             <tbody>
               {rows.slice(0, 50).map((r, i) => (
-                <tr key={i}><td>{r.name}</td><td>{r.qty}</td><td>{r.price ?? ""}</td></tr>
+                <tr key={i}>
+                  <td>
+                    {r.name}
+                    {r.barcode && <div className="muted small">קוד {r.barcode}</div>}
+                    {r.discount && <div className="ok-text small">🏷️ {r.promo} · −₪{r.discount.toFixed(2)}</div>}
+                    <select aria-label={`למה נקנה ${r.name}`} value={r.reason ?? "preferred"}
+                      onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, reason: e.target.value as BuyReason } : x)))}>
+                      {REASONS.map(([v, label]) => (
+                        <option key={v} value={v}>{label}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>{r.qty}</td>
+                  <td>
+                    {r.discount && r.price !== null ? (
+                      <>
+                        <s className="muted">{r.price}</s> {(r.price - r.discount).toFixed(2)}
+                      </>
+                    ) : (r.price ?? "")}
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -146,6 +172,13 @@ export default function ReceiptsPage() {
         {msg && <p className="note">{msg}</p>}
       </section>
 
+      {checking && (
+        <section className="card">
+          <h3>הקבלה מול המאגר</h3>
+          <ReceiptCheck receiptId={checking} />
+        </section>
+      )}
+
       <section className="card">
         <h3>קבלות קודמות</h3>
         {receipts.length === 0 && <p className="muted small">אין עדיין.</p>}
@@ -155,7 +188,12 @@ export default function ReceiptsPage() {
               <span>
                 {r.purchased_at ?? "ללא תאריך"} · {r.receipt_items?.[0]?.count ?? 0} פריטים{r.total ? ` · ₪${r.total}` : ""}
               </span>
-              <button className="link" onClick={() => remove(r.id)}>מחיקה</button>
+              <span>
+                <button className="link" onClick={() => setChecking(checking === r.id ? null : r.id)}>
+                  {checking === r.id ? "סגירה" : "בדיקה"}
+                </button>{" "}
+                <button className="link" onClick={() => remove(r.id)}>מחיקה</button>
+              </span>
             </li>
           ))}
         </ul>

@@ -446,3 +446,38 @@ test("equal prices: the store nearer home comes first, with its distance", async
   await expect(other).toContainText("אותו מחיר");
   await expect(other).toContainText('≈'); // Talpiot is placed by its town only
 });
+
+test("receipts: discount lines, why it was bought, and a check against the price files", async ({ page }) => {
+  const items: Record<string, unknown>[] = [];
+  await mockSupabase(page, (r, url, body) => {
+    const m = r.request().method();
+    if (url.includes("branches")) return r.fulfill({ json: [{ id: 7, name: "דיל קניון מעלה אדומים", city: "מעלה אדומים", chains: { name: "שופרסל" } }] });
+    if (url.includes("/receipts") && m === "POST") return r.fulfill({ json: { id: 42 } });
+    if (url.includes("receipt_items") && m === "POST") {
+      items.push(...JSON.parse(body));
+      return r.fulfill({ json: [] });
+    }
+    if (url.includes("receipt_items")) return r.fulfill({ json: [{ id: 1, reason: "preferred" }, { id: 2, reason: "deal" }] });
+    if (url.includes("rpc/resolve_receipt")) return r.fulfill({ json: 2 });
+    if (url.includes("rpc/receipt_check"))
+      return r.fulfill({ json: [
+        { item_id: 1, raw_name: "12 ביצי משק טריות", barcode: "7290001201589", db_name: "12 ביצי משק טריות L לסר", quantity: 1, paid: 14.24, discount: null, db_price: 14.24, is_weighted: false, db_promo: null },
+        { item_id: 2, raw_name: "שוק. מריר לינדט 1 90%", barcode: "3046920029759", db_name: "שוק.מריר לינדט 90% 100ג", quantity: 2, paid: 45.8, discount: 10.8, db_price: 22.9, is_weighted: false, db_promo: "2ב35 שוקולד אקסלנס 50-100 גרם" },
+      ] });
+    return r.fulfill({ json: [] });
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: /קבלות/ }).click();
+  await page.getByRole("combobox", { name: "סניף הקנייה" }).selectOption("7");
+  await page.locator("textarea").fill(
+    "תאריך,מוצר,ברקוד,כמות,מחיר\n18/10/2026,12 ביצי משק טריות,1201589,1,14.24\n18/10/2026,שוק. מריר לינדט 1 90%,3046920029759,2,45.80\n18/10/2026,שוקולד אקסלנט 50-100 גרם,3512,1,-10.80",
+  );
+  await expect(page.locator(".tbl.preview tbody tr")).toHaveCount(2);
+  await expect(page.locator(".tbl.preview")).toContainText("−₪10.80");
+  await expect(page.getByRole("combobox", { name: /למה נקנה שוק/ })).toHaveValue("deal");
+  await page.getByRole("button", { name: /שמירת קבלה \(2/ }).click();
+  await expect(page.locator(".receipt-check")).toContainText("2/2 שורות תואמות");
+  await expect(page.locator(".receipt-check")).toContainText("המבצע מופיע במאגר");
+  expect(items[1]).toMatchObject({ raw_code: "3046920029759", discount: 10.8, reason: "deal" });
+  expect(items[0]).toMatchObject({ raw_code: "1201589", reason: "preferred" });
+});

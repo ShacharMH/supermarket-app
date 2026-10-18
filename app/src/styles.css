@@ -221,3 +221,11 @@ li.done .sm-name { text-decoration: line-through; }
 .unit-label { flex: 0 0 auto; font-size: 0.8rem; color: var(--muted); }
 .stepper .qty.wide { min-width: 62px; font-size: 0.85rem; }
 .check-row { display: flex; gap: 8px; align-items: center; font-size: 0.95rem; }
+
+/* receipt vs. price files */
+.ok-text { color: var(--ok); }
+.warn-text { color: var(--warn); }
+.check-list li { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.check-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.check-list select { width: auto; max-width: 150px; font-size: 0.85em; }
+.tbl.preview select { display: block; margin-top: 4px; width: auto; max-width: 100%; font-size: 0.85em; }
