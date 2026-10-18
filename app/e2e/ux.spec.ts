@@ -52,6 +52,11 @@ for (const width of [320, 412]) {
       await expect(page.locator(".best .shoplist li")).toHaveCount(30);
       await page.locator(".stores details").first().evaluate((d) => ((d as HTMLDetailsElement).open = true));
       await expectNoOverflow(page, "results");
+      await page.locator(".item").nth(1).getByRole("button", { name: /שינוי/ }).click();
+      await page.getByRole("radio", { name: /מוצר מסוים/ }).click();
+      await page.getByRole("button", { name: /מה נחשב/ }).click();
+      await expectNoOverflow(page, "item sheet");
+      await page.getByRole("dialog").getByRole("button", { name: "סגירה" }).click();
       await page.getByRole("button", { name: /קבלות/ }).click();
       await page.getByText("מה למלא בכל עמודה").click();
       await page.locator("textarea").fill(`מוצר,כמות,מחיר\n${LONG},1,9.9`);
@@ -75,6 +80,10 @@ test("accessibility: no serious problems on any screen", async ({ page }) => {
       report.push(`${screen}: ${v.id} (${v.nodes.length}) ${v.nodes[0]?.target.join(" ")}`);
   };
   await scan("list");
+  await page.locator(".item").first().getByRole("button", { name: /שינוי/ }).click();
+  await page.getByRole("radio", { name: /מוצר מסוים/ }).click();
+  await scan("item sheet");
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /קבלות/ }).click();
   await scan("receipts");
   await page.getByRole("button", { name: /הגדרות/ }).click();

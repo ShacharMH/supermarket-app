@@ -464,3 +464,27 @@ describe("the store on a receipt", () => {
     expect(matchBranch("יוחננוף תלפיות", bs)).toBeNull();
   });
 });
+
+describe("brands", () => {
+  it("reads a maker as a brand", async () => {
+    const { brandOf } = await import("./basket");
+    expect(brandOf({ manufacturer: "לה מוליסנה אס.פ.א." })).toBe("לה מוליסנה");
+    expect(brandOf({ manufacturer: "לה מוליסנה אס.פ.א" })).toBe("לה מוליסנה");
+    expect(brandOf({ manufacturer: 'אסם השקעות בע"מ' })).toBe("אסם השקעות");
+    expect(brandOf({ manufacturer: "חברת קלוגס" })).toBe("קלוגס");
+    expect(brandOf({ manufacturer: "לא ידוע" })).toBeNull();
+  });
+  it("keeps to the chosen brands, cheapest of them", () => {
+    const p = (barcode: string, m: string, price: number): Product => ({ ...prod(barcode, 500, "גרם"), name: `ספגטי ${barcode}`, manufacturer: m, min_price: price });
+    const all = [p("a", "אסם", 5.9), p("b", "ברילה", 8.9), p("c", "לה מוליסנה אס.פ.א.", 9.5)];
+    const r = resolveItem({ key: "ספגטי", qty: 1 }, all, [], new Map(), { choice: "brands", brands: ["ברילה", "לה מוליסנה"] });
+    expect(r.candidates.map((c) => c.barcode).sort()).toEqual(["b", "c"]);
+    const none = resolveItem({ key: "ספגטי", qty: 1 }, all, [], new Map(), { choice: "brands", brands: ["באריו"] });
+    expect(none.candidates).toHaveLength(3); // none sold: all count
+  });
+  it("'cheapest' ignores what receipts say", () => {
+    const all = [prod("a", 500, "גרם"), prod("b", 500, "גרם")];
+    const r = resolveItem({ key: "x", qty: 1 }, all, [], new Map([["b", 3]]), { choice: "cheapest" });
+    expect(r.preferred).toEqual([]);
+  });
+});

@@ -64,14 +64,18 @@ test("choosing a product recalculates and confirms", async ({ page }) => {
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".best")).toBeVisible();
-  await page.locator(".item").first().getByRole("button", { name: "שינוי" }).click();
-  await page.locator(".item select").first().selectOption(PRODUCT.barcode);
+  await page.locator(".item").first().getByRole("button", { name: /שינוי/ }).click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("radio", { name: /מוצר מסוים/ }).click();
+  await sheet.getByRole("button", { name: /קוטג תנובה 5% 250 גרם/ }).click();
+  await sheet.getByRole("checkbox").uncheck(); // no substitutes
+  expect(baskets).toBe(1); // nothing is saved before "סיום"
+  await sheet.getByRole("button", { name: "סיום" }).click();
   await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו");
+  await expect(sheet).toHaveCount(0);
   expect(baskets).toBe(2);
-  expect(posted[0]).toContain(PRODUCT.barcode);
-  await page.getByText("רק המוצר הזה, בלי תחליפים").first().click();
-  await expect.poll(() => posted.length).toBe(2);
-  expect(JSON.parse(posted[1]).strict).toBe(true);
+  expect(JSON.parse(posted[0])).toMatchObject({ barcode: PRODUCT.barcode, strict: true });
+  await expect(page.locator(".item").first()).toContainText("⭐ קוטג תנובה 5% 250 גרם בלבד");
 });
 
 test("weighed items show weight and per-kg price", async ({ page }) => {
@@ -113,9 +117,10 @@ test("guesses by-weight for butcher items and lets the user switch", async ({ pa
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".item")).toContainText("⚖️ 500 גרם");
   expect(JSON.parse(payloads[0]).items[0]).toMatchObject({ qty: 0.5, candidates: ["c:1"] });
-  await page.getByRole("button", { name: "שינוי" }).click();
+  await page.getByRole("button", { name: /שינוי/ }).click();
   await expect(page.getByRole("button", { name: /במשקל/ })).toHaveClass(/on/);
   await page.getByRole("button", { name: /📦 ארוז/ }).click();
+  await page.getByRole("button", { name: "סיום" }).click();
   await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו");
   expect(saved).toMatchObject({ term: "בשר טחון", mode: "pack" });
   expect(JSON.parse(payloads[1]).items[0]).toMatchObject({ qty: 1, candidates: [frozen.barcode] });
@@ -158,16 +163,17 @@ test("by-weight items always show their weight, even with no packaged option", a
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   const meatItem = page.locator(".item", { hasText: "בשר טחון" });
   await expect(meatItem).toContainText("⚖️ 500 גרם");
-  await meatItem.getByRole("button", { name: "שינוי" }).click();
-  await expect(meatItem.locator(".grams input")).toHaveValue("500");
+  await meatItem.getByRole("button", { name: /שינוי/ }).click();
+  await expect(page.getByRole("dialog").locator(".grams input")).toHaveValue("500");
+  await page.getByRole("dialog").getByRole("button", { name: "סגירה" }).click();
   const milkItem = page.locator(".item", { hasText: "חלב 3%" });
   await expect(milkItem).toContainText("📦 1 יח'");
-  await milkItem.getByRole("button", { name: "שינוי" }).click();
-  await expect(milkItem.locator(".seg")).toHaveCount(0);
+  await milkItem.getByRole("button", { name: /שינוי/ }).click();
+  await expect(page.getByRole("dialog").locator(".seg")).toHaveCount(0);
   expect(weighedTerms).not.toContain("חלב"); // never relaxed to a single word
 });
 
-test("an explicit button recalculates the basket", async ({ page }) => {
+test("the item sheet: nothing changed, nothing recalculated; Escape closes", async ({ page }) => {
   let baskets = 0;
   await mockSupabase(page, (r, url, body) => {
     if (url.includes("rpc/price_basket")) baskets++;
@@ -176,9 +182,44 @@ test("an explicit button recalculates the basket", async ({ page }) => {
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".best")).toBeVisible();
-  await page.getByRole("button", { name: /חשב שוב את הסל/ }).click();
-  await expect(page.locator(".toast")).toContainText("הכי משתלם עכשיו: רמי לוי ₪24.40");
-  expect(baskets).toBe(2);
+  await page.locator(".item").first().getByRole("button", { name: /שינוי/ }).click();
+  await expect(page.getByRole("dialog")).toContainText('מה חשוב לך ב"קוטג"?');
+  await expect(page.getByRole("radio", { name: /הכי זול/ })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("button", { name: "סיום" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.locator(".item").first().getByRole("button", { name: /שינוי/ }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(baskets).toBe(1);
+});
+
+test("the item sheet: brands I like", async ({ page }) => {
+  const pasta = (barcode: string, name: string, manufacturer: string, min_price: number) => ({ ...PRODUCT, barcode, name, manufacturer, min_price, max_price: min_price, quantity: 500 });
+  const all = [pasta("a", "ספגטי אסם", "אסם", 5.9), pasta("b", "ספגטי ברילה", "ברילה", 8.9), pasta("c", "ספגטי לה מוליסנה", "לה מוליסנה אס.פ.א.", 9.5)];
+  let saved: Record<string, unknown> | null = null;
+  const payloads: string[] = [];
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: all });
+    if (url.includes("term_settings") && r.request().method() === "POST") saved = JSON.parse(body);
+    if (url.includes("term_settings") && r.request().method() === "GET") return r.fulfill({ json: saved ? [saved] : [] });
+    if (url.includes("rpc/price_basket")) payloads.push(body);
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "ספגטי" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".item")).toContainText("💰 הכי זול");
+  await page.getByRole("button", { name: /שינוי/ }).click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("radio", { name: /מותגים שאני אוהבת/ }).click();
+  await sheet.getByRole("button", { name: /ברילה/ }).click();
+  await sheet.getByRole("button", { name: /לה מוליסנה/ }).click();
+  await expect(sheet.locator(".result")).toContainText("ספגטי ברילה");
+  await sheet.getByRole("button", { name: "סיום" }).click();
+  await expect(page.locator(".toast")).toContainText("עודכן");
+  expect(saved).toMatchObject({ term: "ספגטי", choice: "brands", brands: ["ברילה", "לה מוליסנה"] });
+  expect(JSON.parse(payloads[1]).items[0].candidates.sort()).toEqual(["b", "c"]);
+  await expect(page.locator(".item")).toContainText("🏷️ ברילה, לה מוליסנה");
 });
 
 test("settings show the app version and an update button", async ({ page }) => {
@@ -251,14 +292,16 @@ test("'not this' removes a product from an item and recalculates", async ({ page
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect.poll(() => payloads.length).toBe(1);
   expect(JSON.parse(payloads[0]).items[0].candidates).toEqual(["m:1", "c:1"]); // pickles left out
-  await page.getByRole("button", { name: "שינוי" }).click();
+  await page.getByRole("button", { name: /שינוי/ }).click();
+  await page.getByRole("button", { name: /מה נחשב/ }).click();
   await page.getByRole("button", { name: "לא מתאים: מלפפון בייבי" }).click();
-  await expect(page.locator(".toast")).toContainText("לא ייחשב יותר");
+  await page.getByRole("button", { name: "סיום" }).click();
+  await expect(page.locator(".toast")).toContainText("עודכן");
   expect(saved).toMatchObject({ term: "מלפפונים", excluded: ["מלפפונ בייבי"] });
   expect(JSON.parse(payloads[1]).items[0].candidates).toEqual(["c:1"]);
 });
 
-test("the product in the recommended basket is always listed among the matches", async ({ page }) => {
+test("the item sheet shows what is in the basket and lists every match", async ({ page }) => {
   const lettuces = Array.from({ length: 14 }, (_, i) => ({ ...PRODUCT, barcode: `l${i}`, name: `חסה סוג ${i}`, min_price: 3 + i, quantity: null }));
   await mockSupabase(page, (r, url, body) => {
     if (url.includes("rpc/search_products")) return r.fulfill({ json: lettuces });
@@ -271,12 +314,11 @@ test("the product in the recommended basket is always listed among the matches",
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   const item = page.locator(".item", { hasText: "חסה" });
   await expect(item).toContainText("בסל: חסה סוג 13");
-  await item.getByRole("button", { name: "שינוי" }).click();
-  await expect(item.locator(".matches li").first()).toContainText("חסה סוג 13");
-  await expect(item.locator(".matches li").first()).toContainText("בסל המומלץ");
-  await expect(item.locator(".matches li")).toHaveCount(8);
-  await item.getByRole("button", { name: "הצגת כל 14" }).click();
-  await expect(item.locator(".matches li")).toHaveCount(14);
+  await item.getByRole("button", { name: /שינוי/ }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.locator(".result")).toContainText("בסל: חסה סוג 13");
+  await sheet.getByRole("button", { name: /מה נחשב/ }).click();
+  await expect(sheet.locator(".matches > div")).toHaveCount(14);
 });
 
 test("list editor: add with suggestions, change quantity, remove, edit as text", async ({ page }) => {
@@ -531,6 +573,9 @@ test("a starred purchase joins its list term by its shelf name, marked as prefer
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
   await expect(page.locator(".item")).toContainText("כמו בקבלות: שוק.מריר לינדט 90% 100ג");
   expect(JSON.parse(payload).items[0].preferred).toEqual([lindt.barcode]);
-  await page.getByRole("button", { name: "שינוי" }).click();
-  await expect(page.locator(".item li", { hasText: "לינדט" })).toContainText("⭐ מועדף");
+  await page.getByRole("button", { name: /שינוי/ }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByRole("radio", { name: /מוצר מסוים/ })).toHaveAttribute("aria-checked", "true");
+  await expect(sheet).toContainText("לפי הקבלות שלך");
+  await expect(sheet.getByRole("button", { name: /שוק.מריר לינדט/ })).toHaveAttribute("aria-pressed", "true");
 });

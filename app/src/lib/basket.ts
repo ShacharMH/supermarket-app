@@ -356,7 +356,26 @@ function isSpecialFor(name: string, term: string): boolean {
     .some((w) => SPECIAL_WORDS.some((sw) => w.startsWith(heStem(sw))) && !termStems.some((t) => w.startsWith(t)));
 }
 
+export type Choice = "cheapest" | "brands" | "product";
+
+/** A maker as a brand label: "לה מוליסנה אס.פ.א." -> "לה מוליסנה"; null for placeholders. */
+export function brandOf(p: Pick<Product, "manufacturer">): string | null {
+  const m = maker(p as Product);
+  if (!m) return null;
+  const NOISE = /^(בעמ|במ|אספא|spa|ltd|inc|gmbh|חברת|בע)$/i;
+  const b = m
+    .replace(/["'׳״]/g, "")
+    .split(/\s+/)
+    .filter((w) => !NOISE.test(w.replace(/[.,]/g, "")))
+    .join(" ")
+    .replace(/[.,]+$/g, "")
+    .trim();
+  return b || null;
+}
+
 export type ResolveOptions = {
+  choice?: Choice; // what matters for this term: cheapest of all, some brands, or one product
+  brands?: string[]; // with choice "brands"
   strict?: boolean; // pinned product only, no substitutes
   mode?: BuyMode; // the user's explicit choice for this term
   weightKg?: number; // the user's saved amount for this term
@@ -379,6 +398,13 @@ export function resolveItem(
   // what the user ruled out, then processed/premium variants unless asked for (or all that's left)
   const excluded = new Set(opts.excluded ?? []);
   results = results.filter((r) => pinned.includes(r.barcode) || !excluded.has(normName(r.name)));
+  // "only these brands": the cheapest of them wins (if none is sold, fall back to all)
+  if (opts.choice === "brands" && opts.brands?.length) {
+    const mine = results.filter((r) => opts.brands!.includes(brandOf(r) ?? ""));
+    if (mine.length) results = mine;
+  }
+  // "the cheapest": receipts don't steer this term
+  if (opts.choice === "cheapest") bought = new Map();
   const plain = results.filter((r) => pinned.includes(r.barcode) || !isSpecialFor(r.name, item.key));
   if (plain.length) results = plain;
   if (results.length === 0) return { ...item, weighted: false, candidates: [], preferred: [], reference: null };

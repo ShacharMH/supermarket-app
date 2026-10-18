@@ -4,17 +4,19 @@ import { loadSettings } from "../settings";
 import ShoppingList from "./ShoppingList";
 import ListEditor, { rememberTerms } from "./ListEditor";
 import CompareTable from "./CompareTable";
+import ItemSheet, { type ItemDraft, type ItemSetting } from "./ItemSheet";
 import { errorText } from "../lib/errors";
 import { saveKinds } from "../lib/termKinds";
 import {
-  bestSplits, maker, nameFits, normName, parseList, rankStores, resolveItem, weighedHint,
-  type BranchRow, type BuyMode, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
+  bestSplits, nameFits, parseList, rankStores, resolveItem, weighedHint,
+  type BranchRow, type BuyMode, type Choice, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
 type Result = {
   strict: Set<string>;
   pinned: Set<string>; // terms with a product the user picked (vs. inferred from receipts)
   excluded: Map<string, string[]>; // term -> product names marked "not this"
+  settings: Map<string, ItemSetting>; // what was chosen in the item sheet
   items: ResolvedItem[];
   results: Map<string, Product[]>;
   stores: StoreOption[];
@@ -56,7 +58,6 @@ export default function ListPage() {
   // a toast pinned above the tab bar, visible wherever the user has scrolled to
   const [editing, setEditing] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ text: string; done: boolean } | null>(null);
   const noticeTimer = useRef<number | undefined>(undefined);
   const saveTimer = useRef<number | undefined>(undefined);
@@ -122,7 +123,7 @@ export default function ListPage() {
         supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
-        supabase.from("term_settings").select("term, mode, weight_kg, excluded"),
+        supabase.from("term_settings").select("term, mode, weight_kg, excluded, choice, brands"),
         supabase.from("user_profile").select("home_lat, home_lon").maybeSingle(),
         supabase.from("user_areas").select("lat, lon").not("lat", "is", null).order("id").limit(1),
         supabase.from("branches").select("id").eq("tracked", true).eq("geo_exact", true),
@@ -145,10 +146,13 @@ export default function ListPage() {
         profile.data?.home_lat != null ? { lat: profile.data.home_lat, lon: profile.data.home_lon }
         : area ? { lat: area.lat, lon: area.lon } : null;
       const exact = new Set((located.data ?? []).map((b) => b.id as number));
-      const termOpts = new Map<string, { mode?: BuyMode; weightKg?: number; excluded?: string[] }>(
+      const termOpts = new Map<string, { mode?: BuyMode; weightKg?: number; excluded?: string[]; choice?: Choice; brands?: string[] }>(
         (termSettings.data ?? []).map((t) => [
           t.term,
-          { mode: t.mode ?? undefined, weightKg: t.weight_kg ?? undefined, excluded: t.excluded ?? [] },
+          {
+            mode: t.mode ?? undefined, weightKg: t.weight_kg ?? undefined, excluded: t.excluded ?? [],
+            choice: t.choice ?? undefined, brands: t.brands ?? [],
+          },
         ]),
       );
       const pinned = new Map<string, string[]>();
@@ -230,6 +234,15 @@ export default function ListPage() {
       setResult({
         items: resolved, results, stores, splits, strict, pinned: new Set(pinned.keys()),
         excluded: new Map([...termOpts].map(([k, v]) => [k, v.excluded ?? []])),
+        settings: new Map(
+          items.map((it) => {
+            const o = termOpts.get(it.key);
+            return [it.key, {
+              choice: o?.choice, brands: o?.brands ?? [], excluded: o?.excluded ?? [],
+              pinned: pinned.get(it.key)?.[0], strict: strict.has(it.key),
+            }];
+          }),
+        ),
       });
       return stores[0];
     } catch (e) {
@@ -251,28 +264,24 @@ export default function ListPage() {
     noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
   }
 
-  function pin(term: string, barcode: string, strict = false) {
-    return recalc(`הבחירה עבור "${term}" נשמרה`, async () => {
-      await supabase.from("product_preferences").delete().eq("term", term);
-      if (barcode) await supabase.from("product_preferences").insert({ term, barcode, strict });
+
+  /** Everything chosen in the item sheet, saved at once, then one recalculation. */
+  function saveItem(it: ResolvedItem, d: ItemDraft) {
+    setEditing(null);
+    const kg = d.grams / 1000;
+    return recalc(`"${it.key}" עודכן`, async () => {
+      await supabase.from("term_settings").upsert({
+        term: it.key, choice: d.choice, brands: d.choice === "brands" ? d.brands : [], excluded: d.excluded,
+        mode: d.buy, weight_kg: d.buy === "weight" && Math.abs(kg - it.qty) > 0.001 ? kg : undefined,
+        updated_at: new Date().toISOString(),
+      });
+      await supabase.from("product_preferences").delete().eq("term", it.key);
+      if (d.choice === "product" && d.product)
+        await supabase.from("product_preferences").insert({ term: it.key, barcode: d.product, strict: !d.swap });
     });
   }
 
-  function setExcluded(term: string, names: string[], label: string) {
-    return recalc(label, async () => {
-      await supabase.from("term_settings").upsert({ term, excluded: names, updated_at: new Date().toISOString() });
-    });
-  }
 
-  function setTerm(term: string, patch: { mode?: BuyMode; weight_kg?: number }) {
-    // the list row follows: "במשקל" shows grams, "ארוז" units (with the switch kept)
-    if (patch.mode && weighedHint(term) === null) saveKinds({ [term]: patch.mode === "weight" ? "weight" : "either" });
-    return recalc(`"${term}" עודכן`, async () => {
-      await supabase.from("term_settings").upsert({ term, ...patch, updated_at: new Date().toISOString() });
-      // a product picked for the other buying mode no longer applies
-      if (patch.weight_kg === undefined) await supabase.from("product_preferences").delete().eq("term", term);
-    });
-  }
 
   const best = result?.stores[0];
   const products = new Map<string, Product>();
@@ -355,165 +364,65 @@ export default function ListPage() {
             <ul className="items">
               {result.items.map((it) => {
                 const rs = result.results.get(it.key) ?? [];
-                const chosen = rs.find((p) => p.barcode === it.preferred[0]);
-                const pinned = result.pinned.has(it.key);
-                const both = rs.some((r) => r.is_weighted) && rs.some((r) => !r.is_weighted);
-                const open = editing === it.key;
+                const st = result.settings.get(it.key);
+                const line = best?.branch.lines.find((x) => x.key === it.key);
+                const named = (b: string) => rs.find((p) => p.barcode === b)?.name ?? "";
+                const summary = !rs.length
+                  ? null
+                  : st?.pinned
+                    ? `⭐ ${named(st.pinned)}${st.strict ? " בלבד" : ""}`
+                    : st?.choice === "brands" && st.brands.length
+                      ? `🏷️ ${st.brands.join(", ")}`
+                      : st?.choice !== "cheapest" && it.preferred.length
+                        ? `⭐ כמו בקבלות: ${named(it.preferred[0])}`
+                        : "💰 הכי זול";
                 return (
-                  <li key={it.key} className={`item ${open ? "open" : ""}`}>
+                  <li key={it.key} className="item">
                     <div className="item-row">
                       <div className="item-main">
-                        <div className="ikey">{it.key}</div>
-                        <div className="item-sum">
-                          {!rs.length ? (
-                            <span className="warn">לא נמצא מוצר תואם</span>
-                          ) : (
-                            <>
-                              <span className="chip">{it.weighted ? `⚖️ ${kgLabel(it.qty)}` : `📦 ${+it.qty.toFixed(2)} יח'`}</span>
-                              <span className="muted">
-                                {chosen
-                                  ? pinned
-                                    ? `${chosen.name}${result.strict.has(it.key) ? " בלבד" : ""}`
-                                    : `כמו בקבלות: ${chosen.name}`
-                                  : (() => {
-                                      const l = best?.branch.lines.find((x) => x.key === it.key);
-                                      return l ? `הכי זול מבין הדומים · בסל: ${l.name}` : "הכי זול מבין הדומים";
-                                    })()}
-                              </span>
-                            </>
-                          )}
+                        <div className="ikey">
+                          {it.key}{" "}
+                          {rs.length > 0 && <span className="chip">{it.weighted ? `⚖️ ${kgLabel(it.qty)}` : `📦 ${+it.qty.toFixed(2)} יח'`}</span>}
                         </div>
+                        {!rs.length ? (
+                          <div className="warn">לא נמצא מוצר תואם</div>
+                        ) : (
+                          <>
+                            <div className="item-sum muted">{summary}</div>
+                            {line && (
+                              <div className="item-pick small">
+                                בסל: {line.name}
+                                {!line.preferred && <span className="tag alt">תחליף</span>}
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                       {rs.length > 0 && (
-                        <button className="edit-btn" aria-expanded={open} onClick={() => setEditing(open ? null : it.key)}>
-                          {open ? "סגירה" : "שינוי"}
+                        <button className="edit-btn" aria-haspopup="dialog" aria-label={`שינוי ${it.key}`} onClick={() => setEditing(it.key)}>
+                          שינוי
                         </button>
                       )}
                     </div>
-                    {open && (
-                      <div className="item-edit">
-                        {both && (
-                          <div className="seg" role="group" aria-label="אופן קנייה">
-                            <button className={it.weighted ? "on" : ""} onClick={() => !it.weighted && setTerm(it.key, { mode: "weight" })}>
-                              ⚖️ במשקל
-                            </button>
-                            <button className={!it.weighted ? "on" : ""} onClick={() => it.weighted && setTerm(it.key, { mode: "pack" })}>
-                              📦 ארוז
-                            </button>
-                          </div>
-                        )}
-                        {it.weighted && (
-                          <label className="grams">
-                            כמות:
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              min={50}
-                              step={50}
-                              defaultValue={Math.round(it.qty * 1000)}
-                              key={`${it.key}-${it.qty}`}
-                              onBlur={(e) => {
-                                const g = Number(e.target.value);
-                                if (g > 0 && Math.abs(g / 1000 - it.qty) > 0.001) setTerm(it.key, { mode: "weight", weight_kg: g / 1000 });
-                              }}
-                            />
-                            גרם
-                          </label>
-                        )}
-                        <select aria-label={`איזה מוצר עבור ${it.key}`} value={pinned ? it.preferred[0] : ""} onChange={(e) => pin(it.key, e.target.value)}>
-                          <option value="">כל מוצר דומה (הכי זול)</option>
-                          {rs.map((p) => (
-                            <option key={p.barcode} value={p.barcode}>
-                              {p.name}
-                              {maker(p) ? ` · ${maker(p)}` : ""} · {money(p.min_price)}
-                              {p.max_price !== p.min_price ? `-${money(p.max_price)}` : ""}
-                              {p.is_weighted ? ' לק"ג' : ""}
-                            </option>
-                          ))}
-                        </select>
-                        {(() => {
-                          // the distinct products that count as this item: the ones in the
-                          // recommended basket first, then cheapest first
-                          const inBasket = new Set(
-                            (best?.branch.lines ?? []).filter((l) => l.key === it.key).map((l) => normName(l.name)),
-                          );
-                          for (const l of best?.branch.lines ?? [])
-                            if (l.key === it.key) {
-                              const c = it.candidates.find((x) => x.barcode === l.barcode);
-                              if (c) inBasket.add(normName(c.name));
-                            }
-                          const seen = new Map<string, Product>();
-                          for (const c of [...it.candidates].sort((a, b) => a.min_price - b.min_price))
-                            if (!seen.has(normName(c.name))) seen.set(normName(c.name), c);
-                          const fav = (c: Product) => Number(it.preferred.includes(c.barcode));
-                          const all = [...seen].sort(
-                            ([a, ca], [b, cb]) => Number(inBasket.has(b)) - Number(inBasket.has(a)) || fav(cb) - fav(ca),
-                          );
-                          const showAllMatches = expanded.has(it.key);
-                          const shown = showAllMatches ? all : all.slice(0, 8);
-                          const ex = result.excluded.get(it.key) ?? [];
-                          return (
-                            <div className="matches">
-                              <div className="muted small">נחשבים "{it.key}" ({all.length}):</div>
-                              <ul>
-                                {shown.map(([n, c]) => (
-                                  <li key={n} className={inBasket.has(n) ? "in-basket" : ""}>
-                                    <span>
-                                      {c.name}{" "}
-                                      {it.preferred.includes(c.barcode) && <span className="tag fav">⭐ מועדף</span>}{" "}
-                                      {inBasket.has(n) && <span className="tag promo">בסל המומלץ</span>}{" "}
-                                      <span className="muted small">מ-{money(c.min_price)}{c.is_weighted ? ' לק"ג' : ""}</span>
-                                    </span>
-                                    <button
-                                      className="link not-this"
-                                      aria-label={`לא מתאים: ${c.name}`}
-                                      onClick={() => setExcluded(it.key, [...ex, n], `"${c.name}" לא ייחשב יותר "${it.key}"`)}
-                                    >
-                                      ✕ לא מתאים
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                              {all.length > shown.length || showAllMatches ? (
-                                <button
-                                  className="link"
-                                  onClick={() => {
-                                    const next = new Set(expanded);
-                                    if (showAllMatches) next.delete(it.key);
-                                    else next.add(it.key);
-                                    setExpanded(next);
-                                  }}
-                                >
-                                  {showAllMatches ? "פחות" : `הצגת כל ${all.length}`}
-                                </button>
-                              ) : null}
-                              {ex.length > 0 && (
-                                <button className="link" onClick={() => setExcluded(it.key, [], `ההסרות עבור "${it.key}" בוטלו`)}>
-                                  החזרת {ex.length} מוצרים שהוסרו
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })()}
-                        {pinned && (
-                          <label className="strict">
-                            <input
-                              type="checkbox"
-                              checked={result.strict.has(it.key)}
-                              onChange={(e) => pin(it.key, it.preferred[0], e.target.checked)}
-                            />
-                            רק המוצר הזה, בלי תחליפים
-                          </label>
-                        )}
-                      </div>
-                    )}
                   </li>
                 );
               })}
             </ul>
-            <button disabled={busy} onClick={() => recalc("הסל חושב מחדש", async () => {})}>
-              {busy ? "מחשב..." : "🔄 חשב שוב את הסל"}
-            </button>
+            {(() => {
+              const it = result.items.find((x) => x.key === editing);
+              if (!it) return null;
+              return (
+                <ItemSheet
+                  item={it}
+                  results={result.results.get(it.key) ?? []}
+                  setting={result.settings.get(it.key) ?? { brands: [], strict: false, excluded: [] }}
+                  line={best?.branch.lines.find((x) => x.key === it.key)}
+                  penalty={loadSettings().penalty}
+                  onClose={() => setEditing(null)}
+                  onDone={(d, changed) => (changed ? saveItem(it, d) : setEditing(null))}
+                />
+              );
+            })()}
           </section>
 
           {result.splits.length > 0 && (
