@@ -579,3 +579,21 @@ test("a starred purchase joins its list term by its shelf name, marked as prefer
   await expect(sheet).toContainText("לפי הקבלות שלך");
   await expect(sheet.getByRole("button", { name: /שוק.מריר לינדט/ })).toHaveAttribute("aria-pressed", "true");
 });
+
+test("part of the basket from החישוק, when it saves", async ({ page }) => {
+  const hh = { branch_id: 99, chain_id: "hahishook", chain_name: "החישוק", branch_name: "משלוח עד הבית", city: null, address: null, is_online: true, lat: null, lon: null,
+    lines: [
+      { key: "לחם", qty: 1, barcode: "hahishook:1", name: "לחם מחמצת", price: 3, total: 3, promo: null, promo_min_qty: null, preferred: true },
+      { key: "קוטג", qty: 1, barcode: "hahishook:2", name: "קוטג 5%", price: 2, total: 2, promo: null, promo_min_qty: null, preferred: true },
+    ] };
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/price_basket")) return r.fulfill({ json: [...ROWS, hh] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  const card = page.locator(".hahishook");
+  await expect(card).toContainText("2 מוצרים מהחישוק");
+  await expect(card).toContainText("₪7.00 לנקודת איסוף");
+  await expect(page.locator(".best h2")).not.toContainText("החישוק"); // never the whole basket
+});

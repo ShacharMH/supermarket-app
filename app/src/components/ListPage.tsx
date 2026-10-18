@@ -8,7 +8,7 @@ import ItemSheet, { type ItemDraft, type ItemSetting } from "./ItemSheet";
 import { errorText } from "../lib/errors";
 import { saveKinds } from "../lib/termKinds";
 import {
-  bestSplits, nameFits, parseList, rankStores, resolveItem, weighedHint,
+  bestSplits, hahishookSplit, HAHISHOOK, HAHISHOOK_FEE, nameFits, parseList, rankStores, resolveItem, weighedHint,
   type BranchRow, type BuyMode, type Choice, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
@@ -21,6 +21,7 @@ type Result = {
   results: Map<string, Product[]>;
   stores: StoreOption[];
   splits: SplitOption[];
+  withHahishook: SplitOption | null; // part of the best basket from החישוק, if it saves anything
 };
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
@@ -229,10 +230,13 @@ export default function ListPage() {
         .filter((r) => settings.includeOnline || !r.is_online)
         .map((r) => ({ ...r, geo_exact: exact.has(r.branch_id) }));
       const keys = resolved.map((r) => r.key);
-      const stores = rankStores(rows, keys, { deliveryFee: settings.deliveryFee, home });
-      const splits = bestSplits(rows, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee, home });
+      // החישוק carries a few hundred pantry items: never a whole basket, only a split
+      const shops = rows.filter((r) => r.chain_id !== HAHISHOOK);
+      const stores = rankStores(shops, keys, { deliveryFee: settings.deliveryFee, home });
+      const splits = bestSplits(shops, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee, home });
+      const withHahishook = hahishookSplit(rows, keys, stores[0]);
       setResult({
-        items: resolved, results, stores, splits, strict, pinned: new Set(pinned.keys()),
+        items: resolved, results, stores, splits, withHahishook, strict, pinned: new Set(pinned.keys()),
         excluded: new Map([...termOpts].map(([k, v]) => [k, v.excluded ?? []])),
         settings: new Map(
           items.map((it) => {
@@ -344,6 +348,29 @@ export default function ListPage() {
           ) : (
             <p className="note">לא נמצאו מחירים. בדקו שיש אזור בהגדרות ושהאיסוף הלילי רץ.</p>
           )}
+
+          {result.withHahishook && (() => {
+            const h = result.withHahishook;
+            return (
+              <section className="card hahishook">
+                <h3>🌱 להזמין חלק מהחישוק?</h3>
+                <p className="small">
+                  {h.linesB.length} מוצרים מהחישוק והשאר ב{h.a.chain_name}: <b>{money(h.total)}</b>{" "}
+                  <span className="save">חוסך {money(h.saving)}</span>
+                </p>
+                <p className="muted small">
+                  כולל {money(HAHISHOOK_FEE)} לנקודת איסוף (עד 7 ק"ג, מעל זה חינם). המשלוחים שלהם עדיין בפיילוט, ההחלטה שלך.
+                </p>
+                <details className="store">
+                  <summary><span className="store-name">מה לקנות איפה</span></summary>
+                  <h4>{storeTitle(h.a)}</h4>
+                  <ShoppingList id={`h${h.a.branch_id}a`} title={storeTitle(h.a)} lines={h.linesA} weighted={weighted} products={products} />
+                  <h4>🌱 החישוק</h4>
+                  <ShoppingList id={`h${h.a.branch_id}b`} title="החישוק" lines={h.linesB} weighted={weighted} products={products} />
+                </details>
+              </section>
+            );
+          })()}
 
           {best && result.stores.length > 1 && (
             <CompareTable stores={result.stores} keys={result.items.map((i) => i.key)} weighted={weighted} />

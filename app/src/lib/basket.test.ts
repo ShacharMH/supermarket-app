@@ -488,3 +488,17 @@ describe("brands", () => {
     expect(r.preferred).toEqual([]);
   });
 });
+
+describe("החישוק", () => {
+  it("is offered as part of the best basket whenever it saves anything, with its ₪7 pickup", async () => {
+    const { hahishookSplit } = await import("./basket");
+    const store = branch(1, [line("פסטה", 12), line("חלב", 7)]);
+    const hh = { ...branch(9, [line("פסטה", 4)], true), chain_id: "hahishook" };
+    const best = rankStores([store], ["פסטה", "חלב"], { deliveryFee: 30 })[0];
+    const s = hahishookSplit([store, hh], ["פסטה", "חלב"], best)!;
+    expect(s.linesB.map((l) => l.key)).toEqual(["פסטה"]);
+    expect(s).toMatchObject({ deliveryFee: 7, total: 18, saving: 1 });
+    const pricey = { ...branch(9, [line("פסטה", 6)], true), chain_id: "hahishook" };
+    expect(hahishookSplit([store, pricey], ["פסטה", "חלב"], best)).toBeNull(); // 6 + 7 > 12
+  });
+});

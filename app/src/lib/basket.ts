@@ -545,6 +545,17 @@ export function distanceKm(home: Point | null | undefined, b: BranchRow): number
 const nearer = (a: number | null, b: number | null) => (a ?? Infinity) - (b ?? Infinity) || 0;
 const samePrice = (a: number, b: number) => Math.abs(a - b) < 0.005;
 
+/** החישוק: online, with its own small feed; offered only as part of a split. */
+export const HAHISHOOK = "hahishook";
+// pickup point near work: ₪7 up to 7 kg, free above (their delivery pilot, Oct 2026)
+export const HAHISHOOK_FEE = 7;
+
+/** What getting this store's part costs on top of the goods. */
+export function deliveryFeeOf(b: BranchRow, generalFee: number): number {
+  if (b.chain_id === HAHISHOOK) return HAHISHOOK_FEE;
+  return b.is_online ? generalFee : 0;
+}
+
 export function rankStores(
   rows: BranchRow[],
   keys: string[],
@@ -556,7 +567,7 @@ export function rankStores(
     .map((branch) => {
       const have = new Set(branch.lines.map((l) => l.key));
       const missing = keys.filter((k) => !have.has(k));
-      const deliveryFee = branch.is_online ? opts.deliveryFee : 0;
+      const deliveryFee = deliveryFeeOf(branch, opts.deliveryFee);
       const total = sum([...branch.lines.map((l) => l.total), deliveryFee]);
       const estimated = sum([total, ...missing.map((k) => (typical.get(k) ?? 0) * penalty)]);
       return { branch, total, estimated, missing, deliveryFee, distanceKm: distanceKm(opts.home, branch) };
@@ -597,7 +608,7 @@ export function bestSplits(
       }
       if (linesA.length === 0 || linesB.length === 0) continue;
       if (missing.length > best.missing.length) continue;
-      const deliveryFee = b.is_online ? opts.deliveryFee : 0;
+      const deliveryFee = deliveryFeeOf(b, opts.deliveryFee);
       const total = sum([...linesA, ...linesB].map((l) => l.total).concat(deliveryFee));
       const saving = Math.round((best.total - total) * 100) / 100;
       if (saving >= opts.minSaving) out.push({ a, b, linesA, linesB, total, missing, saving, deliveryFee });
@@ -607,6 +618,13 @@ export function bestSplits(
   return out
     .sort((x, y) => (samePrice(x.saving, y.saving) ? trip(x) - trip(y) : y.saving - x.saving))
     .slice(0, opts.maxPairs ?? 3);
+}
+
+/** The best store's basket with part of it from החישוק, whenever that saves anything. */
+export function hahishookSplit(rows: BranchRow[], keys: string[], best: StoreOption | undefined): SplitOption | null {
+  const hh = rows.find((r) => r.chain_id === HAHISHOOK);
+  if (!best || !hh) return null;
+  return bestSplits([best.branch, hh], keys, best, { minSaving: 0.01, maxPairs: 1, deliveryFee: 0 })[0] ?? null;
 }
 
 // ---------------------------------------------------------------- receipts CSV

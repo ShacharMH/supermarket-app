@@ -286,3 +286,4 @@ li.done .sm-name { text-decoration: line-through; }
 .sheet .matches > div > span { min-width: 0; overflow-wrap: anywhere; }
 .sheet .matches > div.x > span { color: var(--muted); text-decoration: line-through; }
 .done { padding: 12px; }
+.hahishook { border-color: var(--ok); }
