@@ -555,6 +555,13 @@ def stores_are_fresh(conn) -> bool:
 
 def main() -> None:
     db_url = os.environ["SUPABASE_DB_URL"]
+    if os.environ.get("ONLY") == "hahishook":  # quick reload of החישוק alone
+        with psycopg.connect(db_url, autocommit=False, prepare_threshold=None) as conn:
+            ingest_hahishook(conn)
+            with conn.cursor() as cur:
+                cur.execute("select refresh_search_text()")
+            conn.commit()
+        return
     chains = active_chains()
     global _log_conn, _run_id
     with psycopg.connect(db_url, autocommit=False, prepare_threshold=None) as conn:

@@ -16,7 +16,7 @@ import requests
 CHAIN_ID = "hahishook"
 CHAIN_NAME = "החישוק"
 URL = "https://hahishook.com/wp-content/uploads/chp/{day}.tsv"
-HEADERS = {"User-Agent": "supermarket-app (personal price comparison; prices shared by החישוק)"}
+HEADERS = {"User-Agent": "supermarket-app (personal price comparison; prices shared by hahishook)"}  # headers are latin-1
 
 
 def _num(v: str) -> float | None:
