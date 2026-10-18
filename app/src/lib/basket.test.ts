@@ -443,3 +443,19 @@ describe("shortened shelf names", () => {
     expect(nameFits("ביצים", "12 ביצי משק טריות L לסר")).toBe(true);
   });
 });
+
+describe("the store on a receipt", () => {
+  it("finds the tracked branch it names", async () => {
+    const { matchBranch } = await import("./basket");
+    const bs = [
+      { id: 1, chain: "שופרסל", name: "דיל קניון מעלה אדומים", city: "מעלה אדומים", address: "דרך קדם 5" },
+      { id: 2, chain: "שופרסל", name: "BE מעלה אדומים", city: "מעלה אדומים", address: "הרכס 31" },
+      { id: 3, chain: "רמי לוי שיווק השקמה", name: "מישור אדומים", city: "מעלה אדומים", address: "איתם 1" },
+    ];
+    expect(matchBranch("שופרסל דיל קניון מעלה אדומים", bs)).toBe(1);
+    expect(matchBranch("שופרסל דיל, דרך קדם 5 מעלה אדומים", bs)).toBe(1);
+    expect(matchBranch("רמי לוי מישור אדומים", bs)).toBe(3);
+    expect(matchBranch("שופרסל מעלה אדומים", bs)).toBeNull(); // two Shufersal branches there
+    expect(matchBranch("יוחננוף תלפיות", bs)).toBeNull();
+  });
+});

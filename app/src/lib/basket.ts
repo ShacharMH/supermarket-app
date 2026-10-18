@@ -624,6 +624,37 @@ export function normDate(v: string): string | null {
   return null;
 }
 
+export type BranchInfo = { id: number; chain: string; name: string | null; city: string | null; address: string | null };
+
+const STORE_NOISE = new Set(["בעמ", "סניף", "סופר", "מרקט", "רשת", "ובניו", "שיווק"]);
+
+/**
+ * The tracked branch a receipt's store text names ("שופרסל דיל קניון מעלה אדומים",
+ * or the header "שופרסל דיל, דרך קדם 5 מעלה אדומים"). The chain must match, then the
+ * branch with the most matching words wins; null when unsure.
+ */
+export function matchBranch(text: string, branches: BranchInfo[]): number | null {
+  const words = (x: string | null) =>
+    normName(x ?? "").split(/[^א-תa-z0-9]+/).filter((w) => w.length >= 2 && !STORE_NOISE.has(w));
+  const want = words(text);
+  if (!want.length) return null;
+  const has = (pool: string[], w: string) => pool.some((p) => p === w || (w.length >= 3 && p.startsWith(w)) || (p.length >= 3 && w.startsWith(p)));
+  let best: { id: number; score: number } | null = null;
+  let tie = false;
+  for (const b of branches) {
+    const chain = words(b.chain);
+    if (!chain.some((c) => has(want, c))) continue;
+    const place = [...words(b.name), ...words(b.city), ...words(b.address)];
+    const score = want.filter((w) => !has(chain, w) && has(place, w)).length;
+    if (score === 0) continue;
+    if (!best || score > best.score) {
+      best = { id: b.id, score };
+      tie = false;
+    } else if (score === best.score) tie = true;
+  }
+  return best && !tie ? best.id : null;
+}
+
 export function parseReceiptCsv(text: string): ReceiptRow[] {
   const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return [];

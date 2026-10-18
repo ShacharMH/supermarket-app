@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
 import { errorText } from "../lib/errors";
-import { parseReceiptCsv, type ReceiptRow } from "../lib/basket";
+import { matchBranch, parseReceiptCsv, type ReceiptRow } from "../lib/basket";
 import ReceiptCheck, { Star } from "./ReceiptCheck";
 
-type Branch = { id: number; name: string | null; city: string | null; chains: { name: string } | null };
+type Branch = { id: number; name: string | null; city: string | null; address: string | null; chains: { name: string } | null };
 type Receipt = { id: number; purchased_at: string | null; total: number | null; branch_id: number | null; receipt_items: { count: number }[] };
 
-const SAMPLE = "תאריך,מוצר,ברקוד,כמות,מחיר\n15/10/2026,קוטג תנובה 5% 250 גרם,,2,11.80\n15/10/2026,חלב תנובה 3% 1 ליטר,7290004131074,1,7.11";
+const SAMPLE =
+  "תאריך,סניף,מוצר,ברקוד,כמות,מחיר\n15/10/2026,שופרסל דיל קניון מעלה אדומים,קוטג תנובה 5% 250 גרם,,2,11.80\n15/10/2026,שופרסל דיל קניון מעלה אדומים,חלב תנובה 3% 1 ליטר,7290004131074,1,7.11";
 
 function downloadTemplate() {
   // BOM so Excel opens the Hebrew correctly
@@ -32,7 +33,7 @@ export default function ReceiptsPage() {
 
   async function load() {
     const [b, r] = await Promise.all([
-      supabase.from("branches").select("id, name, city, chains(name)").eq("tracked", true).order("chain_id"),
+      supabase.from("branches").select("id, name, city, address, chains(name)").eq("tracked", true).order("chain_id"),
       supabase.from("receipts").select("id, purchased_at, total, branch_id, receipt_items(count)").order("id", { ascending: false }).limit(20),
     ]);
     setBranches((b.data ?? []) as unknown as Branch[]);
@@ -45,8 +46,16 @@ export default function ReceiptsPage() {
   function preview(t: string) {
     setText(t);
     try {
-      setRows(parseReceiptCsv(t));
+      const parsed = parseReceiptCsv(t);
+      setRows(parsed);
       setMsg(null);
+      // the branch from the receipt's store column, unless one was picked by hand
+      const store = parsed.find((r) => r.store)?.store;
+      if (store && !branchId) {
+        const id = matchBranch(store, branches.map((b) => ({ id: b.id, chain: b.chains?.name ?? "", name: b.name, city: b.city, address: b.address })));
+        if (id) setBranchId(String(id));
+        else setMsg(`לא זיהיתי את הסניף "${store}". אפשר לבחור אותו ברשימה.`);
+      }
     } catch (e) {
       setRows([]);
       setMsg(e instanceof Error ? e.message : String(e));
@@ -129,13 +138,14 @@ export default function ReceiptsPage() {
             </thead>
             <tbody>
               <tr><td>תאריך</td><td>לא</td><td>תאריך הקנייה</td><td>15/10/2026</td></tr>
+              <tr><td>סניף</td><td>לא</td><td>רשת וסניף, כמו בראש הקבלה. מספיק בשורה הראשונה</td><td>שופרסל דיל קניון מעלה אדומים</td></tr>
               <tr><td>מוצר</td><td><b>כן</b></td><td>שם הפריט כמו שמודפס בקבלה</td><td>קוטג תנובה 5% 250 גרם</td></tr>
               <tr><td>ברקוד</td><td>לא</td><td>אם מופיע בקבלה. בלעדיו מזהים לפי השם</td><td>7290004131074</td></tr>
               <tr><td>כמות</td><td>לא (1)</td><td>מספר יחידות, או ק"ג במוצרים שקילים</td><td>2</td></tr>
               <tr><td>מחיר</td><td>לא</td><td>סה"כ לשורה (לא ליחידה)</td><td>11.80</td></tr>
             </tbody>
           </table>
-          <p className="muted small">את הסניף בוחרים ברשימה למטה, לא בקובץ.</p>
+          <p className="muted small">אם הסניף לא זוהה מהקובץ, בוחרים אותו ברשימה למטה.</p>
         </details>
         <select aria-label="סניף הקנייה" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
           <option value="">באיזה סניף? (משפר זיהוי)</option>

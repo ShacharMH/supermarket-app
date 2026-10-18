@@ -494,3 +494,19 @@ test("receipts: discount lines, starring the preferred, and a check against the 
   await saved.getByRole("button", { name: /📄/ }).click();
   await expect(saved.locator(".receipt-check")).toContainText("12 ביצי משק טריות");
 });
+
+test("receipts: the store column picks the branch", async ({ page }) => {
+  await mockSupabase(page, (r, url) => {
+    if (url.includes("/rest/v1/branches"))
+      return r.fulfill({ json: [
+        { id: 7, name: "דיל קניון מעלה אדומים", city: "מעלה אדומים", address: "דרך קדם 5", chains: { name: "שופרסל" } },
+        { id: 8, name: "BE מעלה אדומים", city: "מעלה אדומים", address: "הרכס 31", chains: { name: "שופרסל" } },
+      ] });
+    return r.fulfill({ json: [] });
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: /קבלות/ }).click();
+  await expect(page.getByRole("combobox", { name: "סניף הקנייה" }).locator("option")).toHaveCount(3);
+  await page.locator("textarea").fill("תאריך,סניף,מוצר,כמות,מחיר\n18/10/2026,שופרסל דיל קניון מעלה אדומים,מלפפון,0.39,2.69");
+  await expect(page.getByRole("combobox", { name: "סניף הקנייה" })).toHaveValue("7");
+});
