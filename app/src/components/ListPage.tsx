@@ -43,6 +43,24 @@ function distLabel(o: StoreOption): string | null {
   return `${o.branch.geo_exact ? "" : "≈"}${km} ק"מ`;
 }
 
+/** At the bottom of a long open box: close it and go back to its title. */
+function CloseBox() {
+  return (
+    <button
+      type="button"
+      className="link close-box"
+      onClick={(e) => {
+        const box = e.currentTarget.closest("details");
+        if (!box) return;
+        box.open = false;
+        box.querySelector("summary")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }}
+    >
+      ▴ סגירה
+    </button>
+  );
+}
+
 function storeTitle(b: BranchRow) {
   return b.is_online ? `${b.chain_name} · 🚚 אונליין (משלוח)` : `${b.chain_name} · ${b.branch_name ?? ""}`;
 }
@@ -367,6 +385,7 @@ export default function ListPage() {
                   <ShoppingList id={`h${h.a.branch_id}a`} title={storeTitle(h.a)} lines={h.linesA} weighted={weighted} products={products} />
                   <h4>🌱 החישוק</h4>
                   <ShoppingList id={`h${h.a.branch_id}b`} title="החישוק" lines={h.linesB} weighted={weighted} products={products} />
+                  <CloseBox />
                 </details>
               </section>
             );
@@ -467,6 +486,7 @@ export default function ListPage() {
                   <ShoppingList id={`s${s.a.branch_id}-${s.b.branch_id}a`} title={storeTitle(s.a)} lines={s.linesA} weighted={weighted} products={products} />
                   <h4>{storeTitle(s.b)}{s.deliveryFee > 0 && <span className="muted small"> · כולל משלוח {money(s.deliveryFee)}</span>}</h4>
                   <ShoppingList id={`s${s.a.branch_id}-${s.b.branch_id}b`} title={storeTitle(s.b)} lines={s.linesB} weighted={weighted} products={products} />
+                  <CloseBox />
                 </details>
               ))}
             </section>
@@ -503,6 +523,7 @@ export default function ListPage() {
                 )}
                 <ShoppingList id={`b${o.branch.branch_id}`} title={storeTitle(o.branch)} lines={o.branch.lines} weighted={weighted} products={products} />
                 {o.missing.length > 0 && <div className="warn">אין כאן: {o.missing.join(", ")}</div>}
+                <CloseBox />
               </details>
             );
             return (

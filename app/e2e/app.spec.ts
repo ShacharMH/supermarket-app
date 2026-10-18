@@ -596,4 +596,9 @@ test("part of the basket from החישוק, when it saves", async ({ page }) => 
   await expect(card).toContainText("2 מוצרים מהחישוק");
   await expect(card).toContainText("₪7.00 לנקודת איסוף");
   await expect(page.locator(".best h2")).not.toContainText("החישוק"); // never the whole basket
+  const box = card.locator("details");
+  await box.locator("summary").click();
+  await expect(box).toHaveAttribute("open", "");
+  await box.getByRole("button", { name: /סגירה/ }).click();
+  await expect(box).not.toHaveAttribute("open", "");
 });

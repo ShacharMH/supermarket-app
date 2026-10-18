@@ -287,3 +287,6 @@ li.done .sm-name { text-decoration: line-through; }
 .sheet .matches > div.x > span { color: var(--muted); text-decoration: line-through; }
 .done { padding: 12px; }
 .hahishook { border-color: var(--ok); }
+.store > summary .store-name::after { content: " ◂"; color: var(--muted); }
+.store[open] > summary .store-name::after { content: " ▾"; }
+.close-box { display: block; margin: 8px auto 0; padding: 6px 12px; }
