@@ -306,7 +306,9 @@ def select_tracked(conn) -> list[tuple]:
         branches = cur.fetchall()
 
     # per area: [(distance, chain_id, branch_id)]
-    per_area: list[list[tuple[float, str, int]]] = [[] for _ in resolved]
+    # (outside the area's own town?, km, chain, branch): the town's own stores come first,
+    # so a chain's two places go to Ma'ale Adumim's stores, not Jerusalem's nearer edge
+    per_area: list[list[tuple[bool, float, str, int]]] = [[] for _ in resolved]
     nearest_online: dict[str, tuple[float, int]] = {}
     for bid, chain_id, name, address, city, lat, lon, is_online in branches:
         bcity = norm_city(city)
@@ -331,7 +333,7 @@ def select_tracked(conn) -> list[tuple]:
                 continue
             best = d if best is None else min(best, d)
             if not is_online:
-                per_area[i].append((d, chain_id, bid))
+                per_area[i].append((not (acity and bcity == acity), d, chain_id, bid))
         if is_online:
             # one online store per chain: the one closest to any area
             if center is not None:
@@ -348,7 +350,7 @@ def select_tracked(conn) -> list[tuple]:
     for (label, *_rest), cands in zip(resolved, per_area):
         per_chain: dict[str, int] = {}
         kept = 0
-        for d, chain_id, bid in sorted(cands):
+        for _away, _d, chain_id, bid in sorted(cands):
             if kept >= MAX_PER_AREA:
                 break
             if per_chain.get(chain_id, 0) >= MAX_PER_CHAIN_PER_AREA:
@@ -358,6 +360,10 @@ def select_tracked(conn) -> list[tuple]:
             kept += 1
         log(f"area {label}: {len(cands)} branches in radius, tracking {kept}")
     tracked.update(bid for _d, bid in nearest_online.values())
+    # stores the user has receipts from are always followed
+    with conn.cursor() as cur:
+        cur.execute("select distinct branch_id from receipts where branch_id is not null")
+        tracked.update(r[0] for r in cur.fetchall())
 
     with conn.cursor() as cur:
         cur.execute("update branches set tracked = (id = any(%s))", (list(tracked),))
