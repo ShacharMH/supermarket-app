@@ -3,7 +3,8 @@ They publish a daily TSV of every product for anyone who wants their prices:
 https://hahishook.com/wp-content/uploads/chp/YYYYMMDD.tsv  (format stable since 2025)
 
 Columns: 0 itemcode, 1 price, 2 discounted_price, 3 capacity, 4 deeplink, 5 short_name,
-6 capacity unit, 7 long_name, 8 image, 9 leading_barcodes, 10 similar_barcodes, 11 in stock?
+6 capacity unit, 7 long_name, 8 image, 9 leading_barcodes, 10 similar_barcodes, 11 a 0/1 flag
+(not explained: 37 of 638 are 1, among them loose nuts; not used)
 """
 
 from __future__ import annotations
@@ -50,8 +51,6 @@ def parse(text: str) -> list[dict]:
     for line in text.splitlines():
         c = line.split("\t")
         if len(c) < 10 or not c[0].strip().isdigit():
-            continue
-        if len(c) > 11 and c[11].strip() == "0":  # out of stock
             continue
         prices = [p for p in (_num(c[1]), _num(c[2])) if p]
         if not prices:
