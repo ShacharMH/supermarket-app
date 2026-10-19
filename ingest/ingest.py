@@ -591,8 +591,11 @@ def main() -> None:
                 conn.rollback()
                 log(f"hahishook failed: {e!r}")
             try:
-                # search by maker and shelf names, not only the catalogue name
+                # drop catalogue entries no tracked store sells any more, then let search
+                # use maker and shelf names, not only the catalogue name
                 with conn.cursor() as cur:
+                    cur.execute("select prune_products()")
+                    log(f"removed {cur.fetchone()[0]} products no tracked store sells")
                     cur.execute("select refresh_search_text()")
                     log(f"search text refreshed for {cur.fetchone()[0]} products")
                 conn.commit()
