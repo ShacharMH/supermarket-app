@@ -5,6 +5,8 @@ type CheckRow = {
   item_id: number; raw_name: string; barcode: string | null; db_name: string | null; quantity: number;
   paid: number | null; discount: number | null; db_price: number | null; is_weighted: boolean; db_promo: string | null;
   preferred?: boolean;
+  deal_total?: number; // the line's cost with the store's promotion, if one applies
+  deal?: string;
 };
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
@@ -35,6 +37,10 @@ function verdict(r: CheckRow): { ok: boolean; text: string } {
     return { ok: true, text: `${money(r.db_price)} לק"ג במאגר → שקלת כ-${Math.round(kg * 1000)} גרם` };
   }
   const unit = r.paid / (r.quantity || 1);
+  // paid after the promotion: the net price typed in, or the list price with a discount line
+  const net = r.paid - (r.discount ?? 0);
+  if (r.deal_total != null && Math.abs(net - r.deal_total) < 0.03 && Math.abs(unit - r.db_price) >= 0.015)
+    return { ok: true, text: `תואם למחיר המבצע (${money(r.deal_total)}, במקום ${money(r.db_price * (r.quantity || 1))})` };
   return Math.abs(unit - r.db_price) < 0.015
     ? { ok: true, text: `תואם למאגר (${money(r.db_price)})` }
     : { ok: false, text: `במאגר ${money(r.db_price)}, בקבלה ${money(unit)} ליחידה` };
@@ -48,10 +54,14 @@ export default function ReceiptCheck({ receiptId }: { receiptId: number }) {
     Promise.all([
       supabase.rpc("receipt_check", { p_receipt: receiptId }),
       supabase.from("receipt_items").select("id, reason").eq("receipt_id", receiptId),
-    ]).then(([c, r]) => {
+      supabase.rpc("receipt_deal_prices", { p_receipt: receiptId }),
+    ]).then(([c, r, d]) => {
       if (stale) return;
       const starred = new Set((r.data ?? []).filter((x) => x.reason === "preferred").map((x) => x.id as number));
-      setRows(((c.data ?? []) as CheckRow[]).map((x) => ({ ...x, preferred: starred.has(x.item_id) })));
+      const deals = new Map(((d.data ?? []) as { item_id: number; deal_total: number; deal: string }[]).map((x) => [x.item_id, x]));
+      setRows(((c.data ?? []) as CheckRow[]).map((x) => ({
+        ...x, preferred: starred.has(x.item_id), deal_total: deals.get(x.item_id)?.deal_total, deal: deals.get(x.item_id)?.deal,
+      })));
     });
     return () => {
       stale = true;

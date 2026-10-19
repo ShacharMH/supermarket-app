@@ -503,6 +503,7 @@ test("receipts: discount lines, starring the preferred, and a check against the 
     }
     if (url.includes("/rest/v1/receipt_items")) return r.fulfill({ json: [{ id: 1, reason: "preferred" }, { id: 2, reason: "deal" }] });
     if (url.includes("rpc/resolve_receipt")) return r.fulfill({ json: 2 });
+    if (url.includes("rpc/receipt_deal_prices")) return r.fulfill({ json: [{ item_id: 2, deal_total: 35, deal: "2ב35" }] });
     if (url.includes("rpc/receipt_check"))
       return r.fulfill({ json: [
         { item_id: 1, raw_name: "12 ביצי משק טריות", barcode: "7290001201589", db_name: "12 ביצי משק טריות L לסר", quantity: 1, paid: 14.24, discount: null, db_price: 14.24, is_weighted: false, db_promo: null },
