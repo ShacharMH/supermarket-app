@@ -754,6 +754,15 @@ export function lineWeighed(l: Line, weighted: Set<string>, products: Map<string
   return products.get(l.barcode)?.is_weighted ?? weighted.has(l.key);
 }
 
+/**
+ * A basket line's name: the product's one clear name everywhere, and the store's own
+ * shelf name ("אטריות אסם תלתלים 50") only where it differs, to find it on the shelf.
+ */
+export function lineNames(l: Line, products: Map<string, Product>): { name: string; shelf: string | null } {
+  const name = products.get(l.barcode)?.name ?? l.name;
+  return { name, shelf: normName(name) !== normName(l.name) ? l.name : null };
+}
+
 /** How much to put in the cart, in words: "2 יח'" or "500 גרם". */
 export function howMuch(l: Line, weighted: boolean): string {
   return weighted ? fmtKg(l.qty) : `${+l.qty.toFixed(2)} יח'`;
@@ -793,7 +802,8 @@ export function shoppingText(
 ): string {
   const rows = lines.map((l) => {
     const p = products.get(l.barcode);
-    const bits = [`☐ ${howMuch(l, lineWeighed(l, weighted, products))} · ${l.name}`];
+    const { name, shelf } = lineNames(l, products);
+    const bits = [`☐ ${howMuch(l, lineWeighed(l, weighted, products))} · ${name}${shelf ? ` (במדף: ${shelf})` : ""}`];
     const size = packSize(p);
     const m = maker(p);
     if (m) bits.push(m);

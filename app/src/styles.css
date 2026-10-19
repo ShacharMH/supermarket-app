@@ -290,3 +290,4 @@ li.done .sm-name { text-decoration: line-through; }
 .store > summary .store-name::after { content: " ◂"; color: var(--muted); }
 .store[open] > summary .store-name::after { content: " ▾"; }
 .close-box { display: block; margin: 8px auto 0; padding: 6px 12px; }
+.sl-shelf { display: block; }

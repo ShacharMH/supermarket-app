@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { howMuch, lineWeighed, maker, packSize, promoHint, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
+import { howMuch, lineNames, lineWeighed, maker, packSize, promoHint, shelfBarcode, shoppingText, type Line, type Product } from "../lib/basket";
 import ShopMode from "./ShopMode";
 import { groupByCategory } from "../lib/categories";
 
@@ -73,8 +73,9 @@ export default function ShoppingList({
                 <input type="checkbox" checked={checked.has(l.key)} onChange={() => toggle(l.key)} />
                 <span className="sl-main">
                   <span className="sl-name">
-                    <b>{howMuch(l, isW)}</b> · {l.name}
+                    <b>{howMuch(l, isW)}</b> · {lineNames(l, products).name}
                   </span>
+                  {lineNames(l, products).shelf && <span className="sl-shelf muted small">במדף: {lineNames(l, products).shelf}</span>}
                   <span className="sl-meta">
                     {[maker(p), size, isW ? `${money(l.price)} לק"ג` : l.qty !== 1 ? `${money(l.price)} ליח'` : null]
                       .filter(Boolean)

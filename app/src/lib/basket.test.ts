@@ -173,7 +173,7 @@ describe("weighed goods", () => {
 describe("shopping list", () => {
   it("formats a shareable list with amounts, sizes, promos and substitutes", async () => {
     const { shoppingText, shelfBarcode, packSize } = await import("./basket");
-    const products = new Map([["7290000000001", { ...prod("7290000000001", 250, "גרם"), manufacturer: "תנובה" }]]);
+    const products = new Map([["7290000000001", { ...prod("7290000000001", 250, "גרם"), name: "קוטג 5%", manufacturer: "תנובה" }]]);
     const lines = [
       { ...line("קוטג", 10), barcode: "7290000000001", name: "קוטג 5%", qty: 2, promo: "2 ב-10" },
       { ...line("בשר טחון", 32.45), barcode: "c:1", name: "בשר בקר טחון", qty: 0.5 },

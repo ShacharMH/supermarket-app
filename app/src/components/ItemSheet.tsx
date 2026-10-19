@@ -177,7 +177,7 @@ export default function ItemSheet({
 
           <div className="result">
             {changed ? "ייבחר" : "בסל"}:{" "}
-            <b>{!changed && line ? line.name : pick ? pick.name : "אין מוצר מתאים"}</b>
+            <b>{!changed && line ? results.find((r) => r.barcode === line.barcode)?.name ?? line.name : pick ? pick.name : "אין מוצר מתאים"}</b>
             {!changed && line ? <> · <b>{money(line.total)}</b></> : pick ? <span className="muted"> · מ-{money(pick.min_price)}{unit(pick)}</span> : null}
             {swapped && <div className="muted small">{swapped.name} יקר ממנו ביותר מ-{penalty}%, לכן נבחר תחליף.</div>}
           </div>
@@ -203,7 +203,6 @@ export default function ItemSheet({
                     <span>
                       {r.name}
                       {here && <span className="tag promo">בסל</span>}
-                      {here && line && normName(line.name) !== n && <span className="muted small"> · בסניף: {line.name}</span>}
                     </span>
                     <button type="button" className="link not-this" aria-label={`${out ? "החזרה" : "לא מתאים"}: ${r.name}`}
                       onClick={() => set({ excluded: out ? d.excluded.filter((x) => x !== n) : [...d.excluded, n] })}>

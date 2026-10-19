@@ -604,7 +604,7 @@ test("part of the basket from החישוק, when it saves", async ({ page }) => 
   await expect(box).not.toHaveAttribute("open", "");
 });
 
-test("the basket's product is first in 'what counts', also when the store names it differently", async ({ page }) => {
+test("one clear name everywhere; the store's own name only on the shopping list", async ({ page }) => {
   const fusilli = { ...PRODUCT, barcode: "7290000060248", name: "פסטה תלתלים אסם 500", min_price: 4.9, quantity: 500 };
   const penne = { ...PRODUCT, barcode: "2", name: "פסטה פנה ברילה 500", min_price: 6.8, quantity: 500 };
   await mockSupabase(page, (r, url, body) => {
@@ -616,10 +616,14 @@ test("the basket's product is first in 'what counts', also when the store names 
   });
   await page.goto("./");
   await page.getByRole("button", { name: "איפה הכי זול?" }).click();
-  await expect(page.locator(".item")).toContainText("בסל: אטריות אסם תלתלים 50 (פסטה תלתלים אסם 500)");
+  await expect(page.locator(".item")).toContainText("בסל: פסטה תלתלים אסם 500");
+  // the shopping list: the product's clear name, and the store's own name to find it
+  await expect(page.locator(".best .shoplist")).toContainText("פסטה תלתלים אסם 500");
+  await expect(page.locator(".best .shoplist")).toContainText("במדף: אטריות אסם תלתלים 50");
   await page.getByRole("button", { name: /שינוי/ }).click();
   await page.getByRole("button", { name: /מה נחשב/ }).click();
   const first = page.locator(".sheet .matches > div").first();
   await expect(first).toContainText("פסטה תלתלים אסם 500");
-  await expect(first).toContainText("בסניף: אטריות אסם תלתלים 50");
+  await expect(first).toContainText("בסל");
+  await expect(first).not.toContainText("אטריות");
 });

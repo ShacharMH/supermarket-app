@@ -8,7 +8,7 @@ import ItemSheet, { type ItemDraft, type ItemSetting } from "./ItemSheet";
 import { errorText } from "../lib/errors";
 import { saveKinds } from "../lib/termKinds";
 import {
-  bestSplits, hahishookSplit, HAHISHOOK, HAHISHOOK_FEE, nameFits, normName, parseList, rankStores, resolveItem, weighedHint,
+  bestSplits, hahishookSplit, HAHISHOOK, HAHISHOOK_FEE, nameFits, parseList, rankStores, resolveItem, weighedHint,
   type BranchRow, type BuyMode, type Choice, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
@@ -437,12 +437,7 @@ export default function ListPage() {
                             <div className="item-sum muted">{summary}</div>
                             {line && (
                               <div className="item-pick small">
-                                בסל: {line.name}
-                                {(() => {
-                                  // the catalogue name when the store calls it something else
-                                  const p = rs.find((x) => x.barcode === line.barcode);
-                                  return p && normName(p.name) !== normName(line.name) ? <span className="muted"> ({p.name})</span> : null;
-                                })()}
+                                בסל: {rs.find((x) => x.barcode === line.barcode)?.name ?? line.name}
                                 {!line.preferred && <span className="tag alt">תחליף</span>}
                               </div>
                             )}

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { groupByCategory } from "../lib/categories";
-import { howMuch, lineWeighed, maker, packSize, promoHint, shelfBarcode, type Line, type Product } from "../lib/basket";
+import { howMuch, lineNames, lineWeighed, maker, packSize, promoHint, shelfBarcode, type Line, type Product } from "../lib/basket";
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
 
@@ -69,7 +69,8 @@ export default function ShopMode({
           <span className="sm-box" aria-hidden>{checked.has(l.key) ? "✓" : ""}</span>
           <span className="sm-main">
             <span className="sm-qty">{howMuch(l, isW)}</span>
-            <span className="sm-name">{l.name}</span>
+            <span className="sm-name">{lineNames(l, products).name}</span>
+            {lineNames(l, products).shelf && <span className="sm-meta">במדף: {lineNames(l, products).shelf}</span>}
             {meta && <span className="sm-meta">{meta}</span>}
             {l.promo && <span className="tag promo">מבצע: {l.promo}</span>}
             {hint && !checked.has(l.key) && <span className="sm-hint">💡 {hint.text}</span>}
