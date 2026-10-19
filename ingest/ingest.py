@@ -569,6 +569,7 @@ def main() -> None:
         with psycopg.connect(db_url, autocommit=False, prepare_threshold=None) as conn:
             ingest_hahishook(conn)
             with conn.cursor() as cur:
+                cur.execute("select choose_product_names()")
                 cur.execute("select refresh_search_text()")
             conn.commit()
         return
@@ -606,6 +607,8 @@ def main() -> None:
                 with conn.cursor() as cur:
                     cur.execute("select prune_products()")
                     log(f"removed {cur.fetchone()[0]} products no tracked store sells")
+                    cur.execute("select choose_product_names()")
+                    log(f"clearer names for {cur.fetchone()[0]} products")
                     cur.execute("select refresh_search_text()")
                     log(f"search text refreshed for {cur.fetchone()[0]} products")
                 conn.commit()
