@@ -187,11 +187,24 @@ export default function ItemSheet({
           </button>
           {showMatches && (
             <div className="matches">
-              {[...new Map(results.map((r) => [normName(r.name), r])).entries()].map(([n, r]) => {
+              {(() => {
+                // one row per name, the basket's product first (under its catalogue name;
+                // the store may call it something else: "אטריות אסם תלתלים")
+                const byName = new Map<string, Product>();
+                const inBasket = results.find((r) => r.barcode === line?.barcode);
+                if (inBasket) byName.set(normName(inBasket.name), inBasket);
+                for (const r of results) if (!byName.has(normName(r.name))) byName.set(normName(r.name), r);
+                return [...byName.entries()];
+              })().map(([n, r]) => {
                 const out = d.excluded.includes(n);
+                const here = r.barcode === line?.barcode;
                 return (
                   <div key={n} className={out ? "x" : ""}>
-                    <span>{r.name}</span>
+                    <span>
+                      {r.name}
+                      {here && <span className="tag promo">בסל</span>}
+                      {here && line && normName(line.name) !== n && <span className="muted small"> · בסניף: {line.name}</span>}
+                    </span>
                     <button type="button" className="link not-this" aria-label={`${out ? "החזרה" : "לא מתאים"}: ${r.name}`}
                       onClick={() => set({ excluded: out ? d.excluded.filter((x) => x !== n) : [...d.excluded, n] })}>
                       {out ? "↩ החזרה" : "✕ לא מתאים"}

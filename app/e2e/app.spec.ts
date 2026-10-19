@@ -603,3 +603,23 @@ test("part of the basket from החישוק, when it saves", async ({ page }) => 
   await box.getByRole("button", { name: /סגירה/ }).click();
   await expect(box).not.toHaveAttribute("open", "");
 });
+
+test("the basket's product is first in 'what counts', also when the store names it differently", async ({ page }) => {
+  const fusilli = { ...PRODUCT, barcode: "7290000060248", name: "פסטה תלתלים אסם 500", min_price: 4.9, quantity: 500 };
+  const penne = { ...PRODUCT, barcode: "2", name: "פסטה פנה ברילה 500", min_price: 6.8, quantity: 500 };
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: [penne, fusilli] });
+    if (url.includes("rpc/price_basket"))
+      return r.fulfill({ json: [{ ...ROWS[0], lines: [{ key: "פסטה", qty: 1, barcode: fusilli.barcode, name: "אטריות אסם תלתלים 50", price: 4.9, total: 4.9, promo: null, promo_min_qty: null, preferred: true }] }] });
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "פסטה" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".item")).toContainText("בסל: אטריות אסם תלתלים 50 (פסטה תלתלים אסם 500)");
+  await page.getByRole("button", { name: /שינוי/ }).click();
+  await page.getByRole("button", { name: /מה נחשב/ }).click();
+  const first = page.locator(".sheet .matches > div").first();
+  await expect(first).toContainText("פסטה תלתלים אסם 500");
+  await expect(first).toContainText("בסניף: אטריות אסם תלתלים 50");
+});
