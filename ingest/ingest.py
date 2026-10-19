@@ -555,6 +555,16 @@ def stores_are_fresh(conn) -> bool:
 
 def main() -> None:
     db_url = os.environ["SUPABASE_DB_URL"]
+    fresh_hours = os.environ.get("SKIP_IF_FRESH_HOURS")
+    if fresh_hours:  # the backup schedule: nothing to do if a run already succeeded
+        with psycopg.connect(db_url, prepare_threshold=None) as conn, conn.cursor() as cur:
+            cur.execute(
+                "select exists (select 1 from ingest_runs where status = 'ok' and started_at > now() - make_interval(hours => %s))",
+                (int(fresh_hours),),
+            )
+            if cur.fetchone()[0]:
+                print(f"a run succeeded in the last {fresh_hours}h - skipping")
+                return
     if os.environ.get("ONLY") == "hahishook":  # quick reload of החישוק alone
         with psycopg.connect(db_url, autocommit=False, prepare_threshold=None) as conn:
             ingest_hahishook(conn)
