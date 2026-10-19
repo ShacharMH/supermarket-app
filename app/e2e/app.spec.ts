@@ -251,6 +251,43 @@ test("liked brands outside the first results are still found and shown as chosen
   await expect(sheet.getByRole("button", { name: /אסם/ })).toHaveAttribute("aria-pressed", "false");
 });
 
+test("reopening the sheet while the basket is recalculated shows what was just chosen", async ({ page }) => {
+  const pasta = (barcode: string, name: string, manufacturer: string, min_price: number) => ({ ...PRODUCT, barcode, name, manufacturer, min_price, max_price: min_price, quantity: 500 });
+  const all = [pasta("a", "ספגטי אסם", "אסם", 5.9), pasta("b", "ספגטי ברילה", "ברילה", 8.9), pasta("c", "ספגטי לה מוליסנה", "לה מוליסנה", 9.5)];
+  let saved: Record<string, unknown> | null = null;
+  let slow = false;
+  await mockSupabase(page, async (r, url, body) => {
+    if (url.includes("rpc/search_products")) {
+      if (slow) await new Promise((ok) => setTimeout(ok, 1500));
+      return r.fulfill({ json: all });
+    }
+    if (url.includes("term_settings") && r.request().method() === "POST") saved = JSON.parse(body);
+    if (url.includes("term_settings") && r.request().method() === "GET") return r.fulfill({ json: saved ? [saved] : [] });
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "ספגטי" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".item")).toContainText("💰 הכי זול");
+  slow = true;
+  await page.getByRole("button", { name: /שינוי/ }).click();
+  let sheet = page.getByRole("dialog");
+  await sheet.getByRole("radio", { name: /מותגים שאני אוהבת/ }).click();
+  await sheet.getByRole("button", { name: /ברילה/ }).click();
+  await sheet.getByRole("button", { name: "סיום" }).click();
+  await expect(page.locator(".toast")).toContainText("מחשב מחדש");
+  await page.getByRole("button", { name: /שינוי/ }).click();
+  sheet = page.getByRole("dialog");
+  await expect(sheet.getByRole("button", { name: /ברילה/ })).toHaveAttribute("aria-pressed", "true");
+  await sheet.getByRole("button", { name: /לה מוליסנה/ }).click();
+  await expect(page.locator(".toast")).toContainText("עודכן");
+  // the recalculation ending while the sheet is open changes nothing in it
+  await expect(sheet.getByRole("button", { name: /ברילה/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(sheet.getByRole("button", { name: /לה מוליסנה/ })).toHaveAttribute("aria-pressed", "true");
+  await sheet.getByRole("button", { name: "סיום" }).click();
+  await expect.poll(() => saved?.brands).toEqual(["ברילה", "לה מוליסנה"]);
+});
+
 test("settings show the app version and an update button", async ({ page }) => {
   await mockSupabase(page);
   await page.goto("./");

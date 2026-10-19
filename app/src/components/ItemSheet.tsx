@@ -27,7 +27,7 @@ export type ItemDraft = {
  * like / one product), in a bottom sheet. Nothing is saved until "סיום".
  */
 export default function ItemSheet({
-  item, results, setting, line, penalty, onDone, onClose,
+  item, results, setting: current, line, penalty, onDone, onClose,
 }: {
   item: ResolvedItem;
   results: Product[];
@@ -37,6 +37,9 @@ export default function ItemSheet({
   onDone: (draft: ItemDraft, changed: boolean) => void;
   onClose: () => void;
 }) {
+  // what was saved when the sheet opened: a recalculation finishing meanwhile must not
+  // reset the choices or move the chips under the finger
+  const [setting] = useState(current);
   const fromReceipts = !setting.pinned && item.preferred.length > 0 && setting.choice !== "cheapest";
   const initial: ItemDraft = {
     choice: setting.choice ?? (setting.pinned || fromReceipts ? "product" : "cheapest"),

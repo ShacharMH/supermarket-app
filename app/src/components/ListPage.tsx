@@ -96,6 +96,7 @@ export default function ListPage() {
   }, []);
 
   const pending = useRef<string | null>(null);
+  const runs = useRef(0);
 
   async function saveList(v: string) {
     pending.current = null;
@@ -131,6 +132,7 @@ export default function ListPage() {
   });
 
   async function compare(): Promise<StoreOption | undefined> {
+    const run = ++runs.current;
     const settings = loadSettings();
     const items = parseList(text);
     if (items.length === 0) return;
@@ -261,6 +263,8 @@ export default function ListPage() {
       const stores = rankStores(shops, keys, { deliveryFee: settings.deliveryFee, home });
       const splits = bestSplits(shops, keys, stores[0], { minSaving: settings.minSplitSaving, deliveryFee: settings.deliveryFee, home });
       const withHahishook = hahishookSplit(rows, keys, stores[0]);
+      // two quick changes: an older comparison finishing last must not undo the newer one
+      if (run !== runs.current) return;
       setResult({
         items: resolved, results, stores, splits, withHahishook, strict, pinned: new Set(pinned.keys()),
         excluded: new Map([...termOpts].map(([k, v]) => [k, v.excluded ?? []])),
@@ -304,6 +308,14 @@ export default function ListPage() {
   /** Everything chosen in the item sheet, saved at once, then one recalculation. */
   function saveItem(it: ResolvedItem, d: ItemDraft) {
     setEditing(null);
+    // shown right away, so reopening the sheet before the recalculation ends shows the new choice
+    setResult((r) => r && {
+      ...r,
+      settings: new Map(r.settings).set(it.key, {
+        choice: d.choice, brands: d.choice === "brands" ? d.brands : [], excluded: d.excluded,
+        pinned: d.choice === "product" ? d.product ?? undefined : undefined, strict: d.choice === "product" && !d.swap,
+      }),
+    });
     const kg = d.grams / 1000;
     return recalc(`"${it.key}" עודכן`, async () => {
       const check = ({ error }: { error: unknown }) => {
