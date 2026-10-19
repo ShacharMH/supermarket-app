@@ -173,7 +173,7 @@ test("by-weight items always show their weight, even with no packaged option", a
   expect(weighedTerms).not.toContain("חלב"); // never relaxed to a single word
 });
 
-test("the item sheet: nothing changed, nothing recalculated; Escape closes", async ({ page }) => {
+test("the item sheet: nothing changed, nothing recalculated; any way of closing keeps a change", async ({ page }) => {
   let baskets = 0;
   await mockSupabase(page, (r, url, body) => {
     if (url.includes("rpc/price_basket")) baskets++;
@@ -191,6 +191,12 @@ test("the item sheet: nothing changed, nothing recalculated; Escape closes", asy
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(baskets).toBe(1);
+  // a choice is kept however the sheet is closed
+  await page.locator(".item").first().getByRole("button", { name: /שינוי/ }).click();
+  await page.getByRole("radio", { name: /מוצר מסוים/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "סגירה" }).click();
+  await expect(page.locator(".toast")).toContainText("עודכן");
+  expect(baskets).toBe(2);
 });
 
 test("the item sheet: brands I like", async ({ page }) => {

@@ -285,7 +285,7 @@ li.done .sm-name { text-decoration: line-through; }
 .sheet .matches > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
 .sheet .matches > div > span { min-width: 0; overflow-wrap: anywhere; }
 .sheet .matches > div.x > span { color: var(--muted); text-decoration: line-through; }
-.done { padding: 12px; }
+.done { padding: 12px; position: sticky; bottom: 0; box-shadow: 0 -6px 14px var(--card); }
 .hahishook { border-color: var(--ok); }
 .store > summary .store-name::after { content: " ◂"; color: var(--muted); }
 .store[open] > summary .store-name::after { content: " ▾"; }

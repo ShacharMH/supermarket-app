@@ -277,7 +277,13 @@ export default function ListPage() {
   async function recalc(label: string, change: () => Promise<unknown>) {
     window.clearTimeout(noticeTimer.current);
     setNotice({ text: "מחשב מחדש את הסל...", done: false });
-    await change();
+    try {
+      await change();
+    } catch (e) {
+      setNotice({ text: `⚠️ השינוי לא נשמר: ${errorText(e)}`, done: true });
+      noticeTimer.current = window.setTimeout(() => setNotice(null), 8000);
+      return;
+    }
     const top = await compare();
     setNotice({
       text: top ? `✓ ${label}. הכי משתלם עכשיו: ${top.branch.chain_name} ${money(top.total)}` : `✓ ${label}`,
@@ -292,14 +298,17 @@ export default function ListPage() {
     setEditing(null);
     const kg = d.grams / 1000;
     return recalc(`"${it.key}" עודכן`, async () => {
-      await supabase.from("term_settings").upsert({
+      const check = ({ error }: { error: unknown }) => {
+        if (error) throw error;
+      };
+      check(await supabase.from("term_settings").upsert({
         term: it.key, choice: d.choice, brands: d.choice === "brands" ? d.brands : [], excluded: d.excluded,
         mode: d.buy, weight_kg: d.buy === "weight" && Math.abs(kg - it.qty) > 0.001 ? kg : undefined,
         updated_at: new Date().toISOString(),
-      });
-      await supabase.from("product_preferences").delete().eq("term", it.key);
+      }));
+      check(await supabase.from("product_preferences").delete().eq("term", it.key));
       if (d.choice === "product" && d.product)
-        await supabase.from("product_preferences").insert({ term: it.key, barcode: d.product, strict: !d.swap });
+        check(await supabase.from("product_preferences").insert({ term: it.key, barcode: d.product, strict: !d.swap }));
     });
   }
 

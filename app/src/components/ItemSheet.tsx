@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { brandOf, normName, type BuyMode, type Choice, type Line, type Product, type ResolvedItem } from "../lib/basket";
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
@@ -48,15 +48,16 @@ export default function ItemSheet({
     grams: Math.round(item.qty * 1000),
   };
   const [d, setD] = useState<ItemDraft>(initial);
+  const finish = useRef<() => void>(onClose);
   const [showMatches, setShowMatches] = useState(false);
   const [allProducts, setAllProducts] = useState(false);
   const set = (patch: Partial<ItemDraft>) => setD({ ...d, ...patch });
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && finish.current();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
 
   const both = results.some((r) => r.is_weighted) && results.some((r) => !r.is_weighted);
   const pool = results.filter(
@@ -86,6 +87,8 @@ export default function ItemSheet({
     } else pick = fav ?? cheapest;
   }
   const changed = JSON.stringify(d) !== JSON.stringify(initial);
+  // however the sheet is closed (סיום, סגירה, outside, Escape), what was chosen is kept
+  finish.current = () => onDone(d, changed);
   const shownProducts = allProducts ? products : products.slice(0, 6);
   const selected = d.product ? results.find((p) => p.barcode === d.product) : undefined;
   if (selected && !shownProducts.some((p) => p.barcode === selected.barcode)) shownProducts.unshift(selected);
@@ -106,13 +109,13 @@ export default function ItemSheet({
 
   return (
     <>
-      <div className="scrim" onClick={onClose} />
+      <div className="scrim" onClick={() => finish.current()} />
       <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
         <div className="sheet-in">
           <div className="grab" aria-hidden />
           <div className="sheet-head">
             <h3 id="sheet-title">{item.key}</h3>
-            <button type="button" className="link" onClick={onClose}>סגירה</button>
+            <button type="button" className="link" onClick={() => finish.current()}>סגירה</button>
           </div>
 
           {both && (
