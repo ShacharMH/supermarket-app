@@ -72,7 +72,10 @@ export default function ItemSheet({
     const b = brandOf(r);
     if (b) brands.set(b, Math.min(brands.get(b) ?? Infinity, r.min_price));
   }
-  const brandList = [...brands].sort((a, b) => a[1] - b[1]);
+  // saved brands stay on the list even when none of their products came back in this search
+  for (const b of setting.brands) if (!brands.has(b)) brands.set(b, Infinity);
+  const saved = (b: string) => (setting.brands.includes(b) ? 0 : 1);
+  const brandList = [...brands].sort((a, b) => saved(a[0]) - saved(b[0]) || a[1] - b[1]);
 
   // what would be picked, from the lowest price seen (the basket decides per store)
   const cheapest = products[0];
@@ -146,7 +149,7 @@ export default function ItemSheet({
                     return (
                       <button type="button" key={b} className={`bchip ${on ? "on" : ""}`} aria-pressed={on}
                         onClick={() => set({ brands: on ? d.brands.filter((x) => x !== b) : [...d.brands, b] })}>
-                        {b} <small>מ-{money(min)}</small>
+                        {b} {Number.isFinite(min) && <small>מ-{money(min)}</small>}
                       </button>
                     );
                   })}

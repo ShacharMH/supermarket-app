@@ -228,6 +228,29 @@ test("the item sheet: brands I like", async ({ page }) => {
   await expect(page.locator(".item")).toContainText("🏷️ ברילה, לה מוליסנה");
 });
 
+test("liked brands outside the first results are still found and shown as chosen", async ({ page }) => {
+  const pasta = (barcode: string, name: string, manufacturer: string, min_price: number) => ({ ...PRODUCT, barcode, name, manufacturer, min_price, max_price: min_price, quantity: 500 });
+  const plain = [pasta("a", "פסטה אסם", "אסם", 5.9), pasta("b", "פסטה ברילה", "ברילה", 8.9)];
+  const regia = pasta("r", "פסטה רגיה", "פאסטופיציו", 7.5);
+  const payloads: string[] = [];
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/search_products")) return r.fulfill({ json: JSON.parse(body).term === "פסטה פאסטופיציו" ? [regia] : JSON.parse(body).term === "פסטה" ? plain : [] });
+    if (url.includes("term_settings") && r.request().method() === "GET")
+      return r.fulfill({ json: [{ term: "פסטה", choice: "brands", brands: ["ברילה", "פאסטופיציו", "נעלם"], excluded: [] }] });
+    if (url.includes("rpc/price_basket")) payloads.push(body);
+    if (url.includes("shopping_lists")) return r.fulfill({ json: [{ id: 1, items: { text: "פסטה" } }] });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".item")).toContainText("🏷️");
+  expect(JSON.parse(payloads[0]).items[0].candidates.sort()).toEqual(["b", "r"]);
+  await page.getByRole("button", { name: /שינוי/ }).click();
+  const sheet = page.getByRole("dialog");
+  for (const b of ["ברילה", "פאסטופיציו", "נעלם"]) await expect(sheet.getByRole("button", { name: new RegExp(b) })).toHaveAttribute("aria-pressed", "true");
+  await expect(sheet.getByRole("button", { name: /אסם/ })).toHaveAttribute("aria-pressed", "false");
+});
+
 test("settings show the app version and an update button", async ({ page }) => {
   await mockSupabase(page);
   await page.goto("./");

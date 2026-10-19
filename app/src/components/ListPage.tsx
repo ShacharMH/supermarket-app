@@ -200,10 +200,18 @@ export default function ListPage() {
           // no relaxing here: "חלב 3%" -> "חלב" would find halva and toffees
           search("search_weighed", it.key, 40, !!it.byWeight),
         ]);
+        // liked brands are searched for by name too: the first 40 "פסטה" may hold none of them
+        const opts = termOpts.get(it.key);
+        const liked = opts?.choice === "brands" && !it.byWeight ? opts.brands ?? [] : [];
+        const byBrand = (await Promise.all(liked.map((b) => search("search_products", `${it.key} ${b}`, 20, false)))).flat();
         const seen = new Set(packaged.map((p) => p.barcode));
-        const found = [...packaged, ...weighed.filter((p) => !seen.has(p.barcode))];
+        const found = [...packaged];
+        for (const p of [...byBrand, ...weighed]) {
+          if (seen.has(p.barcode)) continue;
+          seen.add(p.barcode);
+          found.push(p);
+        }
         // what you bought counts even when the shelf name is shortened beyond search
-        for (const p of found) seen.add(p.barcode);
         return [...found, ...boughtFor(it.key).filter((p) => !seen.has(p.barcode))];
       };
       await Promise.all(
