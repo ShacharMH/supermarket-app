@@ -26,16 +26,6 @@ type Result = {
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
 
-// where the user is shopping now: an area id, or "all"
-const SHOP_AREA_KEY = "shop-area";
-function loadShopArea(): string | null {
-  try {
-    return localStorage.getItem(SHOP_AREA_KEY);
-  } catch {
-    return null;
-  }
-}
-
 const kgLabel = (q: number) => (q < 1 ? `${Math.round(q * 1000)} גרם` : `${+q.toFixed(2)} ק"ג`);
 
 function navUrl(b: BranchRow) {
@@ -82,9 +72,6 @@ export default function ListPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const [areas, setAreas] = useState<Area[]>([]);
-  const [home, setHome] = useState<Point | null>(null);
-  const [shopArea, setShopArea] = useState<string | null>(loadShopArea);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [tracked, setTracked] = useState<number | null>(null);
   // a toast pinned above the tab bar, visible wherever the user has scrolled to
@@ -101,12 +88,6 @@ export default function ListPage() {
         setListId(data[0].id);
         setText((data[0].items as { text?: string }).text ?? "");
       }
-      const [myAreas, profile] = await Promise.all([
-        supabase.from("user_areas").select("id, label, city, lat, lon, radius_km").order("id"),
-        supabase.from("user_profile").select("home_lat, home_lon").maybeSingle(),
-      ]);
-      setAreas((myAreas.data ?? []) as Area[]);
-      if (profile.data?.home_lat != null) setHome({ lat: profile.data.home_lat, lon: profile.data.home_lon });
       const runs = await supabase.from("ingest_runs").select("finished_at, status").eq("status", "ok").order("id", { ascending: false }).limit(1);
       if (runs.data?.[0]?.finished_at) setLastRun(new Date(runs.data[0].finished_at).toLocaleString("he-IL"));
       const t = await supabase.from("branches").select("id", { count: "exact", head: true }).eq("tracked", true);
@@ -150,22 +131,7 @@ export default function ListPage() {
     };
   });
 
-  // the chosen area, else the one nearest home; "all" compares every area together
-  const here = areas.length < 2 || shopArea === "all" ? null
-    : areas.find((a) => String(a.id) === shopArea) ?? nearestArea(areas, home) ?? null;
-
-  function pickArea(v: string) {
-    setShopArea(v);
-    try {
-      localStorage.setItem(SHOP_AREA_KEY, v);
-    } catch {
-      /* ignore */
-    }
-    const a = v === "all" ? null : areas.find((x) => String(x.id) === v) ?? null;
-    if (result) compare(a);
-  }
-
-  async function compare(where: Area | null = here): Promise<StoreOption | undefined> {
+  async function compare(): Promise<StoreOption | undefined> {
     const run = ++runs.current;
     const settings = loadSettings();
     const items = parseList(text);
@@ -180,7 +146,7 @@ export default function ListPage() {
         supabase.from("user_clubs").select("chain_id"),
         supabase.from("term_settings").select("term, mode, weight_kg, excluded, choice, brands"),
         supabase.from("user_profile").select("home_lat, home_lon").maybeSingle(),
-        supabase.from("user_areas").select("lat, lon").not("lat", "is", null).order("id"),
+        supabase.from("user_areas").select("id, label, city, lat, lon, radius_km").order("id"),
         supabase.from("branches").select("id").eq("tracked", true).eq("geo_exact", true),
         supabase.rpc("bought_products"),
         supabase.rpc("bought_product_names"),
@@ -195,11 +161,13 @@ export default function ListPage() {
           const shelf = shelfNames.get(p.barcode)?.find((n) => nameFits(term, n));
           return shelf ? [{ ...p, name: shelf }] : [];
         });
-      // distances are from home, or else from the centre of the first area
-      const area = where?.lat != null ? where : myAreas.data?.[0];
-      const home: Point | null =
-        profile.data?.home_lat != null ? { lat: profile.data.home_lat, lon: profile.data.home_lon }
-        : area ? { lat: area.lat, lon: area.lon } : null;
+      // "קונה עכשיו ב": only the area nearest that point is compared, and distances are from it
+      // (without it, every area together, distances from the first area's centre)
+      const areas = (myAreas.data ?? []) as Area[];
+      const saved: Point | null = profile.data?.home_lat != null ? { lat: profile.data.home_lat, lon: profile.data.home_lon } : null;
+      const where = saved ? nearestArea(areas, saved) : undefined;
+      const area = areas.find((a) => a.lat != null);
+      const home: Point | null = saved ?? (area ? { lat: area.lat!, lon: area.lon! } : null);
       const exact = new Set((located.data ?? []).map((b) => b.id as number));
       const termOpts = new Map<string, { mode?: BuyMode; weightKg?: number; excluded?: string[]; choice?: Choice; brands?: string[] }>(
         (termSettings.data ?? []).map((t) => [
@@ -377,20 +345,7 @@ export default function ListPage() {
   return (
     <div className="page">
       <ListEditor text={text} onChange={onText} />
-      {areas.length > 1 && (
-        <div className="shop-area">
-          <span className="muted small" id="shop-area">קונה עכשיו ב:</span>
-          <div className="seg" role="group" aria-labelledby="shop-area">
-            {areas.map((a) => (
-              <button key={a.id} type="button" className={here?.id === a.id ? "on" : ""} aria-pressed={here?.id === a.id} onClick={() => pickArea(String(a.id))}>
-                {a.label}
-              </button>
-            ))}
-            <button type="button" className={!here ? "on" : ""} aria-pressed={!here} onClick={() => pickArea("all")}>כל האזורים</button>
-          </div>
-        </div>
-      )}
-      <button className="primary" disabled={busy || !text.trim()} onClick={() => compare()}>
+      <button className="primary" disabled={busy || !text.trim()} onClick={compare}>
         {busy ? "מחשב..." : "איפה הכי זול?"}
       </button>
       <p className="muted small">

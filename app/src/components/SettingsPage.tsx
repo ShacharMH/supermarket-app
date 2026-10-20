@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
 import { errorText } from "../lib/errors";
 import { loadSettings, saveSettings, type Settings } from "../settings";
+import { nearestArea, type Area } from "../lib/basket";
 
-type Area = { id: number; label: string; city: string | null; lat: number | null; lon: number | null; radius_km: number };
 type Chain = { chain_id: string; name: string };
 type Home = { home_lat: number | null; home_lon: number | null; home_label: string | null };
 
@@ -59,6 +59,9 @@ export default function SettingsPage() {
     );
   }
 
+  const nearHome = home?.home_lat != null && areas.length > 1
+    ? nearestArea(areas, { lat: home.home_lat, lon: home.home_lon! }) : undefined;
+
   function setHomeHere() {
     if (!navigator.geolocation) return setHomeMsg("הדפדפן לא תומך במיקום");
     setHomeMsg("מאתר מיקום...");
@@ -67,7 +70,7 @@ export default function SettingsPage() {
         const { error } = await supabase.from("user_profile").upsert({
           home_lat: pos.coords.latitude, home_lon: pos.coords.longitude, home_label: "המיקום שנשמר", updated_at: new Date().toISOString(),
         });
-        setHomeMsg(error ? errorText(error) : "נשמר. בין סניפים באותו מחיר, הקרוב לבית יופיע ראשון.");
+        setHomeMsg(error ? errorText(error) : "נשמר. הסל הזול יחושב באזור הזה.");
         load();
       },
       (e) => setHomeMsg(e.message),
@@ -77,7 +80,7 @@ export default function SettingsPage() {
 
   async function clearHome() {
     await supabase.from("user_profile").update({ home_lat: null, home_lon: null, home_label: null }).not("user_id", "is", null);
-    setHomeMsg("הבית הוסר. המרחקים יחושבו ממרכז האזור הראשון.");
+    setHomeMsg("המיקום הוסר. ההשוואה תכלול את כל האזורים.");
     load();
   }
 
@@ -141,19 +144,19 @@ export default function SettingsPage() {
       </section>
 
       <section className="card">
-        <h3>הבית שלי</h3>
+        <h3>קונה עכשיו ב</h3>
         <p className="muted small">
-          ממנו מחושב המרחק לכל סניף, וכשיש כמה סניפים באותו מחיר, הקרוב מופיע ראשון. נשמר רק בחשבון שלך.
+          הסל הזול מחושב רק באזור הקרוב למיקום הזה, ובמחיר זהה הסניף הקרוב מופיע ראשון. נשמר רק בחשבון שלך.
         </p>
         {home?.home_lat != null ? (
           <div className="row">
-            <span>🏠 מיקום הבית נשמר</span>
+            <span>📍 {nearHome ? `באזור ${nearHome.label}` : "המיקום נשמר"}</span>
             <button className="link" onClick={clearHome}>הסרה</button>
           </div>
         ) : (
-          <p className="muted small">לא הוגדר. בינתיים המרחק נמדד ממרכז האזור הראשון ברשימה.</p>
+          <p className="muted small">לא הוגדר. בינתיים ההשוואה כוללת את כל האזורים.</p>
         )}
-        <button onClick={setHomeHere}>🏠 המיקום הנוכחי שלי הוא הבית</button>
+        <button onClick={setHomeHere}>📍 אני קונה כאן (המיקום הנוכחי)</button>
         {homeMsg && <p className="note">{homeMsg}</p>}
       </section>
 
