@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bestSplits, parseList, parseReceiptCsv, rankStores, resolveItem, type BranchRow, type Product } from "./basket";
+import { bestSplits, inArea, nearestArea, parseList, parseReceiptCsv, rankStores, resolveItem, type BranchRow, type Product } from "./basket";
 
 const prod = (barcode: string, q: number | null, u: string | null, branches = 5): Product => ({
   barcode, name: barcode, manufacturer: null, quantity: q, unit_of_measure: u, is_weighted: false, branches, min_price: 1, max_price: 2,
@@ -500,5 +500,23 @@ describe("החישוק", () => {
     expect(s).toMatchObject({ deliveryFee: 7, total: 18, saving: 1 });
     const pricey = { ...branch(9, [line("פסטה", 6)], true), chain_id: "hahishook" };
     expect(hahishookSplit([store, pricey], ["פסטה", "חלב"], best)).toBeNull(); // 6 + 7 > 12
+  });
+});
+
+describe("areas", () => {
+  const ma = { id: 4, label: "מעלה אדומים", city: "מעלה אדומים", lat: 31.776, lon: 35.302, radius_km: 10 };
+  const ramla = { id: 5, label: "רמלה", city: "רמלה", lat: 31.928, lon: 34.862, radius_km: 5 };
+  const store = (city: string, lat: number | null, lon: number | null, is_online = false) =>
+    ({ branch_id: 1, chain_id: "x", chain_name: "x", branch_name: "x", city, address: null, is_online, lat, lon, lines: [] });
+  it("a store is in an area by its town or within the radius; online stores everywhere", () => {
+    expect(inArea(store("לוד", 31.95, 34.89), ramla)).toBe(true);
+    expect(inArea(store("לוד", 31.95, 34.89), ma)).toBe(false);
+    expect(inArea(store("ירושלים", 31.78, 35.22), ma)).toBe(true);
+    expect(inArea(store("מעלה אדומים", null, null), ma)).toBe(true);
+    expect(inArea(store("", null, null, true), ma)).toBe(true);
+  });
+  it("the default area is the one nearest home", () => {
+    expect(nearestArea([ramla, ma], { lat: 31.77, lon: 35.3 })?.id).toBe(4);
+    expect(nearestArea([ramla, ma], null)?.id).toBe(5);
   });
 });

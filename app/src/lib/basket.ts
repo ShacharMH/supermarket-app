@@ -541,6 +541,27 @@ export function distanceKm(home: Point | null | undefined, b: BranchRow): number
   return 2 * 6371 * Math.asin(Math.sqrt(a));
 }
 
+/** A place the user shops in: a town and a radius around its centre. */
+export type Area = { id: number; label: string; city: string | null; lat: number | null; lon: number | null; radius_km: number };
+
+const townKey = (t: string | null) => (t ?? "").replace(/["'`׳״\-–_/,.()]/g, " ").replace(/\s+/g, " ").trim();
+
+/** Same rule as in_my_areas() in the database: the town itself, or within the radius. */
+export function inArea(b: BranchRow, a: Area): boolean {
+  if (b.is_online) return true; // delivers there
+  if (a.city && b.city && townKey(a.city) === townKey(b.city)) return true;
+  const d = a.lat != null && a.lon != null ? distanceKm({ lat: a.lat, lon: a.lon }, b) : null;
+  return d != null && d <= Number(a.radius_km) + 0.5;
+}
+
+/** The area to compare in by default: the one nearest home, or else the first. */
+export function nearestArea(areas: Area[], home: Point | null): Area | undefined {
+  const located = areas.filter((a) => a.lat != null && a.lon != null);
+  if (!home || !located.length) return areas[0];
+  const far = (a: Area) => distanceKm(home, { is_online: false, lat: a.lat, lon: a.lon } as BranchRow) ?? Infinity;
+  return [...located].sort((x, y) => far(x) - far(y))[0];
+}
+
 // same price (to the agora): the nearer store first, stores with no known distance last
 const nearer = (a: number | null, b: number | null) => (a ?? Infinity) - (b ?? Infinity) || 0;
 const samePrice = (a: number, b: number) => Math.abs(a - b) < 0.005;

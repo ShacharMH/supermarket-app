@@ -555,6 +555,34 @@ test("equal prices: the store nearer home comes first, with its distance", async
   await expect(other).toContainText('≈'); // Talpiot is placed by its town only
 });
 
+test("the comparison is for the area I'm shopping in: nearest home by default, switchable", async ({ page }) => {
+  const lines = ROWS[0].lines;
+  const lod = { ...ROWS[0], branch_id: 1, chain_name: "שופרסל", branch_name: "לוד", city: "לוד", lat: 31.95, lon: 34.89, lines: lines.map((l) => ({ ...l, total: l.total - 5 })) };
+  const ma = { ...ROWS[0], branch_id: 2, chain_name: "רמי לוי", branch_name: "מישור אדומים", city: "מעלה אדומים", lat: 31.802, lon: 35.253, lines };
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("rpc/price_basket")) return r.fulfill({ json: [lod, ma] });
+    if (url.includes("user_areas")) return r.fulfill({ json: [
+      { id: 5, label: "רמלה", city: "רמלה", lat: 31.928, lon: 34.862, radius_km: 5 },
+      { id: 4, label: "מעלה אדומים", city: "מעלה אדומים", lat: 31.776, lon: 35.302, radius_km: 10 },
+    ] });
+    if (url.includes("user_profile")) return r.fulfill({ json: { home_lat: 31.771, home_lon: 35.298 } });
+    return listHandler(r, url, body);
+  });
+  await page.goto("./");
+  const where = page.getByRole("group", { name: "קונה עכשיו ב:" });
+  await expect(where.getByRole("button", { name: "מעלה אדומים" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "איפה הכי זול?" }).click();
+  await expect(page.locator(".best h2")).toContainText("רמי לוי");
+  await expect(page.getByText("לוד")).toHaveCount(0);
+  await where.getByRole("button", { name: "כל האזורים" }).click();
+  await expect(page.locator(".best h2")).toContainText("שופרסל");
+  await where.getByRole("button", { name: "רמלה" }).click();
+  await expect(page.locator(".best h2")).toContainText("שופרסל");
+  await expect(page.getByText("מישור אדומים")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("group", { name: "קונה עכשיו ב:" }).getByRole("button", { name: "רמלה" })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("receipts: discount lines, starring the preferred, and a check against the price files", async ({ page }) => {
   const items: Record<string, unknown>[] = [];
   await mockSupabase(page, (r, url, body) => {

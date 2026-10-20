@@ -8,8 +8,8 @@ import ItemSheet, { type ItemDraft, type ItemSetting } from "./ItemSheet";
 import { errorText } from "../lib/errors";
 import { saveKinds } from "../lib/termKinds";
 import {
-  bestSplits, hahishookSplit, HAHISHOOK, HAHISHOOK_FEE, nameFits, parseList, rankStores, resolveItem, weighedHint,
-  type BranchRow, type BuyMode, type Choice, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
+  bestSplits, hahishookSplit, HAHISHOOK, HAHISHOOK_FEE, inArea, nameFits, nearestArea, parseList, rankStores, resolveItem, weighedHint,
+  type Area, type BranchRow, type BuyMode, type Choice, type Point, type ListItem, type Product, type ResolvedItem, type SplitOption, type StoreOption,
 } from "../lib/basket";
 
 type Result = {
@@ -25,6 +25,16 @@ type Result = {
 };
 
 const money = (n: number) => `₪${n.toFixed(2)}`;
+
+// where the user is shopping now: an area id, or "all"
+const SHOP_AREA_KEY = "shop-area";
+function loadShopArea(): string | null {
+  try {
+    return localStorage.getItem(SHOP_AREA_KEY);
+  } catch {
+    return null;
+  }
+}
 
 const kgLabel = (q: number) => (q < 1 ? `${Math.round(q * 1000)} גרם` : `${+q.toFixed(2)} ק"ג`);
 
@@ -72,6 +82,9 @@ export default function ListPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [home, setHome] = useState<Point | null>(null);
+  const [shopArea, setShopArea] = useState<string | null>(loadShopArea);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [tracked, setTracked] = useState<number | null>(null);
   // a toast pinned above the tab bar, visible wherever the user has scrolled to
@@ -88,6 +101,12 @@ export default function ListPage() {
         setListId(data[0].id);
         setText((data[0].items as { text?: string }).text ?? "");
       }
+      const [myAreas, profile] = await Promise.all([
+        supabase.from("user_areas").select("id, label, city, lat, lon, radius_km").order("id"),
+        supabase.from("user_profile").select("home_lat, home_lon").maybeSingle(),
+      ]);
+      setAreas((myAreas.data ?? []) as Area[]);
+      if (profile.data?.home_lat != null) setHome({ lat: profile.data.home_lat, lon: profile.data.home_lon });
       const runs = await supabase.from("ingest_runs").select("finished_at, status").eq("status", "ok").order("id", { ascending: false }).limit(1);
       if (runs.data?.[0]?.finished_at) setLastRun(new Date(runs.data[0].finished_at).toLocaleString("he-IL"));
       const t = await supabase.from("branches").select("id", { count: "exact", head: true }).eq("tracked", true);
@@ -131,7 +150,22 @@ export default function ListPage() {
     };
   });
 
-  async function compare(): Promise<StoreOption | undefined> {
+  // the chosen area, else the one nearest home; "all" compares every area together
+  const here = areas.length < 2 || shopArea === "all" ? null
+    : areas.find((a) => String(a.id) === shopArea) ?? nearestArea(areas, home) ?? null;
+
+  function pickArea(v: string) {
+    setShopArea(v);
+    try {
+      localStorage.setItem(SHOP_AREA_KEY, v);
+    } catch {
+      /* ignore */
+    }
+    const a = v === "all" ? null : areas.find((x) => String(x.id) === v) ?? null;
+    if (result) compare(a);
+  }
+
+  async function compare(where: Area | null = here): Promise<StoreOption | undefined> {
     const run = ++runs.current;
     const settings = loadSettings();
     const items = parseList(text);
@@ -140,13 +174,13 @@ export default function ListPage() {
     setBusy(true);
     setError(null);
     try {
-      const [prefs, history, clubs, termSettings, profile, areas, located, boughtProducts, boughtNames] = await Promise.all([
+      const [prefs, history, clubs, termSettings, profile, myAreas, located, boughtProducts, boughtNames] = await Promise.all([
         supabase.from("product_preferences").select("term, barcode, strict"),
         supabase.from("purchase_history").select("barcode, times_bought"),
         supabase.from("user_clubs").select("chain_id"),
         supabase.from("term_settings").select("term, mode, weight_kg, excluded, choice, brands"),
         supabase.from("user_profile").select("home_lat, home_lon").maybeSingle(),
-        supabase.from("user_areas").select("lat, lon").not("lat", "is", null).order("id").limit(1),
+        supabase.from("user_areas").select("lat, lon").not("lat", "is", null).order("id"),
         supabase.from("branches").select("id").eq("tracked", true).eq("geo_exact", true),
         supabase.rpc("bought_products"),
         supabase.rpc("bought_product_names"),
@@ -162,7 +196,7 @@ export default function ListPage() {
           return shelf ? [{ ...p, name: shelf }] : [];
         });
       // distances are from home, or else from the centre of the first area
-      const area = areas.data?.[0];
+      const area = where?.lat != null ? where : myAreas.data?.[0];
       const home: Point | null =
         profile.data?.home_lat != null ? { lat: profile.data.home_lat, lon: profile.data.home_lon }
         : area ? { lat: area.lat, lon: area.lon } : null;
@@ -256,6 +290,7 @@ export default function ListPage() {
       if (error) throw error;
       const rows = ((data ?? []) as BranchRow[])
         .filter((r) => settings.includeOnline || !r.is_online)
+        .filter((r) => !where || inArea(r, where))
         .map((r) => ({ ...r, geo_exact: exact.has(r.branch_id) }));
       const keys = resolved.map((r) => r.key);
       // החישוק carries a few hundred pantry items: never a whole basket, only a split
@@ -342,7 +377,20 @@ export default function ListPage() {
   return (
     <div className="page">
       <ListEditor text={text} onChange={onText} />
-      <button className="primary" disabled={busy || !text.trim()} onClick={compare}>
+      {areas.length > 1 && (
+        <div className="shop-area">
+          <span className="muted small" id="shop-area">קונה עכשיו ב:</span>
+          <div className="seg" role="group" aria-labelledby="shop-area">
+            {areas.map((a) => (
+              <button key={a.id} type="button" className={here?.id === a.id ? "on" : ""} aria-pressed={here?.id === a.id} onClick={() => pickArea(String(a.id))}>
+                {a.label}
+              </button>
+            ))}
+            <button type="button" className={!here ? "on" : ""} aria-pressed={!here} onClick={() => pickArea("all")}>כל האזורים</button>
+          </div>
+        </div>
+      )}
+      <button className="primary" disabled={busy || !text.trim()} onClick={() => compare()}>
         {busy ? "מחשב..." : "איפה הכי זול?"}
       </button>
       <p className="muted small">
