@@ -4,11 +4,16 @@ import App from "./App";
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
 
-// Reload automatically when a new version is deployed, and check for one hourly.
+// Reload automatically when a new version is deployed. Check hourly, and whenever the app
+// is returned to: a tab or phone app left open for days would otherwise keep old code.
 registerSW({
   immediate: true,
   onRegisteredSW(_url, reg) {
-    if (reg) setInterval(() => reg.update(), 60 * 60 * 1000);
+    if (!reg) return;
+    setInterval(() => reg.update(), 60 * 60 * 1000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update().catch(() => {});
+    });
   },
 });
 
