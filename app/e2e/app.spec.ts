@@ -583,6 +583,7 @@ test("the basket is for the area of the saved 'קונה עכשיו ב' location"
 
 test("receipts: discount lines, starring the preferred, and a check against the price files", async ({ page }) => {
   const items: Record<string, unknown>[] = [];
+  let renamed = "";
   await mockSupabase(page, (r, url, body) => {
     const m = r.request().method();
     if (url.includes("branches")) return r.fulfill({ json: [{ id: 7, name: "דיל קניון מעלה אדומים", city: "מעלה אדומים", chains: { name: "שופרסל" } }] });
@@ -593,6 +594,7 @@ test("receipts: discount lines, starring the preferred, and a check against the 
       items.push(...JSON.parse(body));
       return r.fulfill({ json: [] });
     }
+    if (url.includes("/rest/v1/receipt_items") && m === "PATCH") renamed = body;
     if (url.includes("/rest/v1/receipt_items")) return r.fulfill({ json: [{ id: 1, reason: "preferred" }, { id: 2, reason: "deal" }] });
     if (url.includes("rpc/resolve_receipt")) return r.fulfill({ json: 2 });
     if (url.includes("rpc/receipt_deal_prices")) return r.fulfill({ json: [{ item_id: 2, deal_total: 35, deal: "2ב35" }] });
@@ -600,6 +602,8 @@ test("receipts: discount lines, starring the preferred, and a check against the 
       return r.fulfill({ json: [
         { item_id: 1, raw_name: "12 ביצי משק טריות", barcode: "7290001201589", db_name: "12 ביצי משק טריות L לסר", quantity: 1, paid: 14.24, discount: null, db_price: 14.24, is_weighted: false, db_promo: null },
         { item_id: 2, raw_name: "שוק. מריר לינדט 1 90%", barcode: "3046920029759", db_name: "שוק.מריר לינדט 90% 100ג", quantity: 2, paid: 45.8, discount: 10.8, db_price: 22.9, is_weighted: false, db_promo: "2ב35 שוקולד אקסלנס 50-100 גרם" },
+        // a misread name: the barcode is kabanos
+        { item_id: 3, raw_name: "ענבים 160 גר'", barcode: "7290000363363", db_name: "קבנוס 160 גר'", quantity: 1, paid: 16.9, discount: null, db_price: 16.9, is_weighted: false, db_promo: null },
       ] });
     return r.fulfill({ json: [] });
   });
@@ -617,7 +621,12 @@ test("receipts: discount lines, starring the preferred, and a check against the 
   await star.click();
   await expect(star).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: /שמירת קבלה \(2/ }).click();
-  await expect(page.locator(".receipt-check")).toContainText("2/2 שורות תואמות");
+  await expect(page.locator(".receipt-check")).toContainText("3/3 שורות תואמות");
+  // only the misread name is flagged, and the catalogue's name can be taken
+  await expect(page.locator(".receipt-check").getByText("השם בקבלה לא דומה")).toHaveCount(1);
+  await page.getByRole("button", { name: "לקחת את השם מהמאגר" }).click();
+  await expect(page.locator(".receipt-check")).not.toContainText("ענבים");
+  await expect.poll(() => renamed).toContain("קבנוס");
   await expect(page.locator(".receipt-check")).toContainText("המבצע מופיע במאגר");
   expect(items[1]).toMatchObject({ raw_code: "3046920029759", discount: 10.8, reason: "preferred" });
   expect(items[0]).toMatchObject({ raw_code: "1201589", reason: "other" });

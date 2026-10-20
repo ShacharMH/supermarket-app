@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bestSplits, inArea, nearestArea, parseList, parseReceiptCsv, rankStores, resolveItem, type BranchRow, type Product } from "./basket";
+import { bestSplits, inArea, namesUnrelated, nearestArea, parseList, parseReceiptCsv, rankStores, resolveItem, type BranchRow, type Product } from "./basket";
 
 const prod = (barcode: string, q: number | null, u: string | null, branches = 5): Product => ({
   barcode, name: barcode, manufacturer: null, quantity: q, unit_of_measure: u, is_weighted: false, branches, min_price: 1, max_price: 2,
@@ -518,5 +518,20 @@ describe("areas", () => {
   it("the default area is the one nearest home", () => {
     expect(nearestArea([ramla, ma], { lat: 31.77, lon: 35.3 })?.id).toBe(4);
     expect(nearestArea([ramla, ma], null)?.id).toBe(5);
+  });
+});
+
+describe("receipt names against the barcode's product", () => {
+  it("flags a name with nothing in common", () => {
+    expect(namesUnrelated("ענבים 160 גר'", "קבנוס  160 גר'")).toBe(true);
+    expect(namesUnrelated("פרגית עוף", "טחול עוף")).toBe(true);
+  });
+  it("accepts shortened and slightly misspelled till names", () => {
+    expect(namesUnrelated("חסה סליק מהדרין ק", "חסה לליק מהדרין קמעונאי")).toBe(false);
+    expect(namesUnrelated("צמד איטסקי אריזה", "צמד איטלקי אריזה מוגדלת")).toBe(false);
+    expect(namesUnrelated("המבורגר אנג BLACK", "BLACK המבורגר אנטריקוט XL")).toBe(false);
+    expect(namesUnrelated("משקה סויה טבעי במ", "משקה סויה טבעי במתיקות מופחתת 1 ליטר")).toBe(false);
+    expect(namesUnrelated("תפוח אדמה לבן גור", "תפוח אדמה לבן גורמה דוד משה 3 יצרן/מותג: דוד משה")).toBe(false);
+    expect(namesUnrelated("1557", "בטטה")).toBe(false);
   });
 });

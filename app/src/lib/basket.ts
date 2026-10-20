@@ -897,3 +897,31 @@ export function setLineWeight(line: string, kg: number): string {
 export function setLineUnits(line: string, count: number): string {
   return `${lineName(line)} ${count} יח'`;
 }
+
+// words that say nothing about what the product is ("פרגית עוף" vs "טחול עוף")
+const PLAIN_WORDS = new Set(["עוף", "בקר", "גר", "גרם", "ג", "ק", "קג", "ל", "מל", "ליטר", "יח", "יחידות", "מארז", "אריזה", "ארוז", "במשקל", "טרי", "חדש"]);
+
+const nameWords = (s: string) =>
+  s.toLowerCase().replace(/["'`׳״]/g, "").split(/[^a-z֐-׿]+/).filter((w) => w.length > 1 && !PLAIN_WORDS.has(w));
+
+// one letter apart: a till's typo or a scan misread ("סליק" / "לליק", "איטסקי" / "איטלקי")
+function oneOff(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1 || Math.min(a.length, b.length) < 4) return false;
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  const rest = (x: string, skip: number) => x.slice(i + skip);
+  return rest(a, 1) === rest(b, 1) || rest(a, 1) === rest(b, 0) || rest(a, 0) === rest(b, 1);
+}
+
+/**
+ * The receipt's name has nothing in common with the product its barcode belongs to:
+ * likely a misread receipt ("ענבים 160 גר'" for "קבנוס 160 גר'"). Shortened till names
+ * ("משקה סויה טבעי במ") still count as the same product.
+ */
+export function namesUnrelated(receipt: string, catalogue: string): boolean {
+  const a = nameWords(receipt);
+  const b = nameWords(catalogue);
+  if (!a.length || !b.length) return false;
+  const same = (x: string, y: string) => x === y || x.startsWith(y) || y.startsWith(x) || oneOff(x, y);
+  return !a.some((x) => b.some((y) => same(x, y)));
+}

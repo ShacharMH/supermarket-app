@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
+import { namesUnrelated } from "../lib/basket";
 
 type CheckRow = {
   item_id: number; raw_name: string; barcode: string | null; db_name: string | null; quantity: number;
@@ -73,6 +74,12 @@ export default function ReceiptCheck({ receiptId }: { receiptId: number }) {
     await supabase.from("receipt_items").update({ reason: preferred ? "preferred" : "other" }).eq("id", id);
   }
 
+  // a misread receipt: keep the barcode, take the catalogue's name
+  async function takeDbName(id: number, name: string) {
+    setRows((rs) => rs?.map((r) => (r.item_id === id ? { ...r, raw_name: name } : r)) ?? null);
+    await supabase.from("receipt_items").update({ raw_name: name }).eq("id", id);
+  }
+
   if (!rows) return <p className="muted small">בודק מול המאגר...</p>;
   const matched = rows.filter((r) => verdict(r).ok).length;
   return (
@@ -88,6 +95,12 @@ export default function ReceiptCheck({ receiptId }: { receiptId: number }) {
               <div>
                 <b>{r.raw_name}</b>
                 {r.db_name && r.db_name !== r.raw_name && <span className="muted small"> · במאגר: {r.db_name}</span>}
+                {r.db_name && namesUnrelated(r.raw_name, r.db_name) && (
+                  <div className="small warn-text">
+                    ⚠️ השם בקבלה לא דומה למוצר של הברקוד. אולי טעות בסריקה?{" "}
+                    <button className="link" onClick={() => takeDbName(r.item_id, r.db_name!)}>לקחת את השם מהמאגר</button>
+                  </div>
+                )}
                 <div className={`small ${v.ok ? "ok-text" : "warn-text"}`}>{v.ok ? "✓" : "⚠️"} {v.text}</div>
                 {(r.discount ?? 0) > 0 && (
                   <div className={`small ${r.db_promo ? "ok-text" : "warn-text"}`}>
