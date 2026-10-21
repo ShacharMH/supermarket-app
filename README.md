@@ -32,3 +32,13 @@ cd app && npm install && npm run dev      # אפליקציה
 cd app && npm test                         # בדיקות לוגיקה
 pip install -r ingest/requirements.txt && SUPABASE_DB_URL=... python ingest/ingest.py
 ```
+
+### טבלה חדשה במסד הנתונים
+מ-30.10.2026 Supabase לא נותן אוטומטית לאפליקציה גישה לטבלאות חדשות. כל מיגרציה שיוצרת טבלה ב-`public` צריכה לכלול באותה מיגרציה:
+
+```sql
+grant select, insert, update, delete on public.<table> to authenticated;
+grant select, insert, update, delete on public.<table> to service_role;
+```
+
+(לא ל-`anon`: אין בה נתונים למבקרים לא מחוברים.) בדיקת התקינות הלילית מתריעה אם יש טבלה שהאפליקציה לא יכולה לגשת אליה.

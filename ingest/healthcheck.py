@@ -63,6 +63,20 @@ def check_security(conn, user_id: str | None) -> None:
         ok("anonymous visitors see no data")
         raise psycopg.Rollback()
 
+    # from 30.10.2026 Supabase no longer grants the API roles access to new tables by
+    # default: a table created without its own GRANT is unreachable from the app
+    with conn.cursor() as cur:
+        cur.execute(
+            "select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+            " where n.nspname = 'public' and c.relkind in ('r', 'p', 'v')"
+            " and not has_table_privilege('authenticated', c.oid, 'select')"
+        )
+        missing = [r[0] for r in cur.fetchall()]
+    if missing:
+        fail(f"the app (role authenticated) has no access to: {', '.join(missing)} - add a GRANT")
+    else:
+        ok("the app can reach every table")
+
     if not user_id:
         warn("no registered user yet - skipping signed-in checks")
         return
