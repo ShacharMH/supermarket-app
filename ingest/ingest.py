@@ -487,12 +487,18 @@ def ingest_prices(conn, tracked_rows) -> None:
         # which is far faster than listing every file of the chain
         enum = getattr(ScraperFactory, scraper)
         paths: list[str] = []
-        for _bid, store_id, _cid in branches:
+        for i, (_bid, store_id, _cid) in enumerate(branches):
             t = datetime.now()
             got = fetch(enum, [FileTypesFilters.PRICE_FULL_FILE.name, FileTypesFilters.PROMO_FULL_FILE.name],
                         rf"-0*{int(store_id)}-\d{{8}}", store_id=int(store_id))
             log(f"downloaded {scraper} store {store_id}: {len(got)} files in {(datetime.now() - t).seconds}s")
             paths += got
+            # the chain's site is unreachable (Carrefour has refused GitHub's servers since
+            # 22.10.2026): every further store would only wait out the same timeouts
+            # (a store with no files answers quickly; a dead site makes us wait minutes)
+            if not got and (datetime.now() - t).seconds > 300 and i + 1 < len(branches):
+                log(f"{scraper}: site not answering - skipping its other {len(branches) - i - 1} stores")
+                break
         return paths
 
     with ThreadPoolExecutor(DOWNLOAD_WORKERS) as pool:
