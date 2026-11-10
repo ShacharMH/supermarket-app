@@ -44,6 +44,7 @@ jobs:
           cache-dependency-path: ingest/requirements.txt
       - run: pip install -r ingest/requirements.txt
       - name: Run ingestion
+        id: ingest
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           CHAINS: ${{ inputs.chains }}
@@ -55,3 +56,9 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python ingest/healthcheck.py
+      - name: Price-drop alerts
+        if: ${{ !cancelled() && steps.ingest.outcome == 'success' }}
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+        run: python ingest/alerts.py

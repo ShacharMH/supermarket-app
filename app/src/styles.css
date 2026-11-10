@@ -291,3 +291,10 @@ li.done .sm-name { text-decoration: line-through; }
 .store[open] > summary .store-name::after { content: " ▾"; }
 .close-box { display: block; margin: 8px auto 0; padding: 6px 12px; }
 .sl-shelf { display: block; }
+
+/* price drops */
+.drops ul { display: flex; flex-direction: column; gap: 10px; }
+.drops li { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; border-bottom: 1px dashed var(--line); padding-bottom: 8px; }
+.drops li:last-child { border-bottom: none; padding-bottom: 0; }
+.drop-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 0 0 auto; }
+.watched { display: flex; flex-direction: column; gap: 2px; }

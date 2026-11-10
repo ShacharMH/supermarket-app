@@ -5,6 +5,7 @@ import ShoppingList from "./ShoppingList";
 import ListEditor, { rememberTerms } from "./ListEditor";
 import CompareTable from "./CompareTable";
 import ItemSheet, { type ItemDraft, type ItemSetting } from "./ItemSheet";
+import PriceDrops from "./PriceDrops";
 import { errorText } from "../lib/errors";
 import { saveKinds } from "../lib/termKinds";
 import {
@@ -344,6 +345,7 @@ export default function ListPage() {
 
   return (
     <div className="page">
+      <PriceDrops onAdd={(name) => onText(text.trim() ? `${text.trimEnd()}\n${name}` : name)} />
       <ListEditor text={text} onChange={onText} />
       <button className="primary" disabled={busy || !text.trim()} onClick={compare}>
         {busy ? "מחשב..." : "איפה הכי זול?"}

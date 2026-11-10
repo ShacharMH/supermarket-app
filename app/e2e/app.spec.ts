@@ -728,3 +728,54 @@ test("one clear name everywhere; the store's own name only on the shopping list"
   await expect(first).toContainText("בסל");
   await expect(first).not.toContainText("אטריות");
 });
+
+test("price drops on liked products: shown above the list, added to it, dismissed", async ({ page }) => {
+  let dismissed = "";
+  let list = "";
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("price_alerts") && r.request().method() === "PATCH") {
+      dismissed = url + body;
+      return r.fulfill({ json: [] });
+    }
+    if (url.includes("price_alerts")) return r.fulfill({ json: [
+      { id: 7, name: "שוקולד מריר לינדט 90%", unit_price: 11.45, usual_price: 22.9, promo: "2ב22.90", min_qty: 2, ends_at: "2026-11-20T21:59:00Z", created_at: "2026-11-10T15:00:00Z", branch_id: 3 },
+    ] });
+    if (url.includes("/rest/v1/branches") && url.includes("chains")) return r.fulfill({ json: [{ id: 3, name: "מישור אדומים", chains: { name: "רמי לוי" } }] });
+    if (url.includes("shopping_lists") && r.request().method() === "PATCH") list = body;
+    return listHandler(r, url, body);
+  });
+  await page.goto("./?alerts=1");
+  const drops = page.getByRole("region", { name: "ירידות מחיר" });
+  await expect(drops).toContainText("₪11.45 במקום ₪22.90");
+  await expect(drops).toContainText("-50%");
+  await expect(drops).toContainText("בקנייה של 2");
+  await expect(drops).toContainText("רמי לוי מישור אדומים");
+  await drops.getByRole("button", { name: "➕ לרשימה" }).click();
+  await expect(page.locator(".list-rows")).toContainText("שוקולד מריר לינדט 90%");
+  await expect(drops).toHaveCount(0);
+  await expect.poll(() => dismissed).toContain("id=eq.7");
+  await expect.poll(() => list).toContain("לינדט");
+});
+
+test("settings: price-drop alerts - threshold and which products are watched", async ({ page }) => {
+  let saved: Record<string, unknown> | null = null;
+  await mockSupabase(page, (r, url, body) => {
+    if (url.includes("user_profile") && r.request().method() === "POST") {
+      saved = JSON.parse(body);
+      return r.fulfill({ json: [] });
+    }
+    if (url.includes("user_profile")) return r.fulfill({ json: { alerts_on: true, alert_pct: 15, alert_min_saving: 3, alert_muted: [] } });
+    if (url.includes("watched_products")) return r.fulfill({ json: [{ barcode: "1", starred: true, receipts: 1 }, { barcode: "2", starred: false, receipts: 3 }] });
+    if (url.includes("/rest/v1/products")) return r.fulfill({ json: [{ barcode: "1", name: "לינדט 90%" }, { barcode: "2", name: "קוטג 5%" }] });
+    return r.fulfill({ json: [] });
+  });
+  await page.goto("./");
+  await page.getByRole("button", { name: /הגדרות/ }).click();
+  await expect(page.getByText("מוצרים במעקב (2)")).toBeVisible();
+  await expect(page.getByText("נקנה ב-3 קבלות")).toBeVisible();
+  await page.getByRole("checkbox", { name: /קוטג 5%/ }).uncheck();
+  await expect.poll(() => saved?.alert_muted).toEqual(["2"]);
+  await expect(page.getByText("מוצרים במעקב (1)")).toBeVisible();
+  await page.getByRole("spinbutton", { name: /חיסכון/ }).fill("5");
+  await expect.poll(() => saved?.alert_min_saving).toBe(5);
+});

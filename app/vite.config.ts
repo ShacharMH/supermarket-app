@@ -15,6 +15,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       injectRegister: false,
       includeAssets: ["icon.svg", "icon-192.png", "icon-512.png"],
+      // price-drop notifications (public/push-sw.js)
+      workbox: { importScripts: ["push-sw.js"] },
       manifest: {
         name: "סל זול",
         short_name: "סל זול",

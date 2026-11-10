@@ -51,7 +51,8 @@ def as_role(cur, role: str, user_id: str | None = None) -> None:
 def check_security(conn, user_id: str | None) -> None:
     with conn.transaction(), conn.cursor() as cur:
         as_role(cur, "anon")
-        for table in ("prices", "products", "branches", "receipts", "user_areas", "term_settings", "user_profile"):
+        for table in ("prices", "products", "branches", "receipts", "user_areas", "term_settings", "user_profile",
+                      "price_alerts", "push_subscriptions", "watch_prices"):
             try:
                 with conn.transaction():
                     cur.execute(f"select count(*) from {table}")

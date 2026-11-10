@@ -3,6 +3,7 @@ import { supabase } from "../supabase";
 import { errorText } from "../lib/errors";
 import { loadSettings, saveSettings, type Settings } from "../settings";
 import { nearestArea, type Area } from "../lib/basket";
+import AlertsSettings from "./AlertsSettings";
 
 type Chain = { chain_id: string; name: string };
 type Home = { home_lat: number | null; home_lon: number | null; home_label: string | null };
@@ -159,6 +160,8 @@ export default function SettingsPage() {
         <button onClick={setHomeHere}>📍 אני קונה כאן (המיקום הנוכחי)</button>
         {homeMsg && <p className="note">{homeMsg}</p>}
       </section>
+
+      <AlertsSettings />
 
       <section className="card">
         <h3>מועדוני לקוחות</h3>
