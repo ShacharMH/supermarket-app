@@ -1,7 +1,12 @@
 import { supabase } from "../supabase";
 
 /** The public half of the key the nightly job signs notifications with (ingest/alerts.py). */
-export const VAPID_PUBLIC_KEY = "BPITistOfuQNzYKOZj1vjpkVJsd3NOMZ_WnWPTn1TJUGSsLcIqOiJth9YggOjaXro9apN8WiBv3xS0Qh_KMY2Uo";
+async function publicKey(): Promise<string> {
+  const { data, error } = await supabase.from("app_config").select("value").eq("key", "vapid_public_key").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("ההתראות יהיו זמינות אחרי עדכון המחירים הבא");
+  return data.value as string;
+}
 
 export type PushState = "unsupported" | "ios-install" | "denied" | "on" | "off";
 
@@ -27,7 +32,7 @@ export async function enablePush(): Promise<PushState> {
   if ((await Notification.requestPermission()) !== "granted") return pushState();
   const reg = await navigator.serviceWorker.ready;
   const sub = (await reg.pushManager.getSubscription())
-    ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(VAPID_PUBLIC_KEY) as BufferSource }));
+    ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(await publicKey()) as BufferSource }));
   const j = sub.toJSON();
   const { error } = await supabase.from("push_subscriptions").upsert(
     { endpoint: sub.endpoint, p256dh: j.keys?.p256dh, auth: j.keys?.auth },

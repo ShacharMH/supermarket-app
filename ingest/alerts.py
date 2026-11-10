@@ -2,10 +2,10 @@
 
 compute_price_alerts() (in the database) keeps tonight's lowest price of every product a
 user likes and records the ones well below their usual price. This sends each user one
-push notification for the new ones. Without VAPID_PRIVATE_KEY nothing is sent: the alerts
-still show in the app.
+push notification for the new ones, signed with the VAPID key kept in Supabase's vault.
 """
 
+import base64
 import json
 import os
 import sys
@@ -71,16 +71,37 @@ def send(conn, private_key: str) -> None:
             print(f"user {str(user_id)[:8]}: {len(alerts)} alerts, sent to {sent} devices")
 
 
+def vapid_key(conn) -> str:
+    """The signing key, from Supabase's vault. Made there on the first run, so it never
+    leaves GitHub and the database; the app reads the public half from app_config."""
+    with conn.cursor() as cur:
+        cur.execute("select decrypted_secret from vault.decrypted_secrets where name = 'vapid_private_key'")
+        row = cur.fetchone()
+        if row:
+            return row[0].strip()
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        k = ec.generate_private_key(ec.SECP256R1())
+        b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()  # noqa: E731
+        private = b64(k.private_numbers().private_value.to_bytes(32, "big"))
+        public = b64(k.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+        cur.execute("select vault.create_secret(%s, 'vapid_private_key', 'signs price-drop push notifications')", (private,))
+        cur.execute(
+            """insert into app_config (key, value) values ('vapid_public_key', %s)
+               on conflict (key) do update set value = excluded.value""",
+            (public,),
+        )
+        print("created the push notification key")
+        return private
+
+
 def main() -> int:
     with psycopg.connect(os.environ["SUPABASE_DB_URL"], prepare_threshold=None, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute("select compute_price_alerts()")
             print(f"{cur.fetchone()[0]} new price-drop alerts")
-        key = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
-        if key:
-            send(conn, key)
-        else:
-            print("VAPID_PRIVATE_KEY not set - alerts are shown in the app only")
+        send(conn, os.environ.get("VAPID_PRIVATE_KEY", "").strip() or vapid_key(conn))
     return 0
 
 
